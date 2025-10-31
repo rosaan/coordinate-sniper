@@ -4,6 +4,7 @@ Uses SQLite for local state tracking.
 """
 import os
 import sys
+import time
 from typing import Dict, Any, List
 from convex import ConvexClient
 from dotenv import load_dotenv
@@ -135,6 +136,10 @@ def sync_loop(client: ConvexClient, db: LocalDB) -> None:
                 
                 # Process the user
                 process_user(user, client, db)
+                
+                # Wait 10 seconds before processing next user
+                print("[+] Waiting 10 seconds before next user...")
+                time.sleep(10)
                 
     except KeyboardInterrupt:
         print("\n[+] Sync engine stopped by user")
