@@ -79,25 +79,91 @@ def create_user(client_id: str, first_name: str, last_name: str,
     
     # Get current clipboard content before copying (to detect change)
     clipboard_before = get_clipboard()
+    print(f"    [*] Current clipboard (before copy): {clipboard_before[:50]}..." if len(clipboard_before) > 50 else f"    [*] Current clipboard (before copy): {clipboard_before}")
+    
+    # Prepare verification strings (normalized for comparison)
+    first_name_lower = first_name.lower().strip()
+    last_name_lower = last_name.lower().strip() if last_name else ""
+    print(f"    [*] Will verify clipboard contains: '{first_name}' or '{last_name}'")
     
     print("    [*] Copying recording link...")
     click(RECORDING_LINK_COPY, delay=0.5)
+    wait(0.5)  # Give copy operation time to complete
     
-    # Wait for clipboard to actually change (not just wait fixed time)
-    print("    [*] Waiting for clipboard to update...")
-    try:
-        url = wait_for_clipboard_change(
-            initial_content=clipboard_before,
-            timeout=5.0,
-            check_interval=0.2
-        )
-        print(f"    [✓] Clipboard updated: {url[:50]}..." if len(url) > 50 else f"    [✓] Clipboard updated: {url}")
-    except TimeoutError:
-        print("    [!] Clipboard didn't change, trying to get current content...")
-        # Fallback: just get current clipboard
-        url = get_clipboard()
-        if url == clipboard_before:
-            print("    [✗] Warning: Clipboard content didn't change!")
+    # Wait for clipboard to change AND verify it contains user data
+    print("    [*] Waiting for clipboard to update and verify content...")
+    url = None
+    max_retries = 15  # Increased retries for slow systems
+    retry_count = 0
+    
+    while retry_count < max_retries and url is None:
+        try:
+            # Wait for clipboard to change from previous state
+            new_clipboard = wait_for_clipboard_change(
+                initial_content=clipboard_before,
+                timeout=3.0,  # Per attempt timeout
+                check_interval=0.2
+            )
+            
+            # Verify clipboard contains user's first or last name
+            # This ensures we got the correct link for this user
+            clipboard_lower = new_clipboard.lower()
+            
+            contains_first_name = first_name_lower in clipboard_lower if first_name_lower else False
+            contains_last_name = last_name_lower in clipboard_lower if last_name_lower else False
+            
+            if contains_first_name or contains_last_name:
+                url = new_clipboard
+                print(f"    [✓] Clipboard verified - contains user data!")
+                if contains_first_name:
+                    print(f"    [✓] Found first name '{first_name}' in clipboard")
+                if contains_last_name:
+                    print(f"    [✓] Found last name '{last_name}' in clipboard")
+                print(f"    [✓] Link: {url[:100]}..." if len(url) > 100 else f"    [✓] Link: {url}")
+                break
+            else:
+                retry_count += 1
+                print(f"    [!] Attempt {retry_count}/{max_retries}: Clipboard changed but doesn't contain user data")
+                print(f"    [*] Looking for: '{first_name}' or '{last_name}'")
+                print(f"    [*] Clipboard content: {new_clipboard[:100]}..." if len(new_clipboard) > 100 else f"    [*] Clipboard content: {new_clipboard}")
+                
+                if retry_count < max_retries:
+                    # Update baseline to the new (wrong) content and try again
+                    clipboard_before = new_clipboard
+                    wait(1.0)  # Wait before retrying
+                    # Click copy again
+                    print("    [*] Re-clicking copy button...")
+                    click(RECORDING_LINK_COPY, delay=0.5)
+                    wait(0.5)  # Give copy operation time
+        except TimeoutError:
+            retry_count += 1
+            print(f"    [!] Attempt {retry_count}/{max_retries}: Clipboard didn't change")
+            if retry_count < max_retries:
+                wait(1.0)
+                print("    [*] Re-clicking copy button...")
+                click(RECORDING_LINK_COPY, delay=0.5)
+                wait(0.5)  # Give copy operation time
+    
+    # Final fallback: try to get clipboard one more time
+    if url is None:
+        print("    [✗] ERROR: Could not verify clipboard contains user data after all retries!")
+        print("    [*] Getting clipboard content as fallback...")
+        final_clipboard = get_clipboard()
+        
+        if final_clipboard == clipboard_before:
+            print("    [✗] CRITICAL ERROR: Clipboard content didn't change at all!")
+            raise RuntimeError(f"Failed to copy link - clipboard unchanged. Expected to find '{first_name}' or '{last_name}'")
+        else:
+            # Last attempt: check if it contains user data
+            final_lower = final_clipboard.lower()
+            if (first_name_lower in final_lower if first_name_lower else False) or \
+               (last_name_lower in final_lower if last_name_lower else False):
+                url = final_clipboard
+                print(f"    [✓] Fallback successful - found user data in clipboard")
+            else:
+                print(f"    [✗] WARNING: Got unverified link that doesn't contain user data")
+                print(f"    [*] Unverified link: {final_clipboard[:100]}..." if len(final_clipboard) > 100 else f"    [*] Unverified link: {final_clipboard}")
+                url = final_clipboard  # Still return it, but warn
     
     print("    [*] Closing link dialog...")
     click(CLOSE_LINK_CODE, delay=0.5)
