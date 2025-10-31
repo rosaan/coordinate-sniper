@@ -48,7 +48,7 @@ def create_user(client_id: str, first_name: str, last_name: str,
     # Ensure VAEEG is closed at the end, even if there's an error
     try:
         # Execute the create user sequence with extended delays
-            print("    [*] Clicking create user button...")
+        print("    [*] Clicking create user button...")
         click(CREATE_USER_BTN, delay=0.5)
         wait(2)  # Wait for form to load
         
