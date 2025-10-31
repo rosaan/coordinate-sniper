@@ -10,8 +10,9 @@ MYSQL_CONFIG = {
     "host": "localhost",
     "user": "root",
     "password": "",
-    "database": "va"
-    # Note: MySQL v4 doesn't support utf8mb4 charset, so we omit it
+    "database": "va",
+    "charset": "utf8",  # MySQL 4.x does not understand utf8mb4; utf8 is the safest wide charset it supports
+    "use_unicode": True,
 }
 
 
@@ -71,4 +72,3 @@ def test_mysql_connection() -> bool:
         print(f"[!] MySQL connection failed: {e}")
         print("[!] Make sure MySQL is running and database 'va' exists")
         return False
-
