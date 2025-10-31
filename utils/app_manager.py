@@ -413,17 +413,26 @@ def find_and_close_error_dialog(app: Application,
     """
     Find and close error dialog popups (like SQL errors, MySQL errors).
     Checks both window title and content text, and also checks for modal dialogs.
+    Uses case-insensitive matching and requires keywords to appear together in context.
     
     Args:
         app: Application instance
-        error_keywords: List of keywords to match in dialog title/content (default: common error keywords)
+        error_keywords: List of keywords/phrases to match in dialog title/content. 
+                       Should be specific SQL/MySQL error phrases (e.g., "mysql error", "sql error")
         timeout: Maximum time to wait for dialog (in seconds)
         
     Returns:
         True if error dialog was found and closed, False otherwise
     """
     if error_keywords is None:
-        error_keywords = ["error", "sql", "mysql", "exception", "failed", "warning", "server", "gone away"]
+        # Default to specific SQL error phrases only
+        error_keywords = [
+            "mysql error",
+            "sql error", 
+            "database error",
+            "mysql exception",
+            "sql exception"
+        ]
     
     try:
         # Wait a bit for dialog to appear (dialogs might take time to show)
@@ -477,7 +486,22 @@ def find_and_close_error_dialog(app: Application,
                 full_text = (window_title + " " + window_content).lower()
                 
                 # Check if window title OR content contains error keywords
-                if any(keyword.lower() in full_text for keyword in error_keywords):
+                # Use case-insensitive matching and require exact phrase matches
+                # This prevents false positives from words like "server" in "Server connection successful"
+                matches_error = False
+                for keyword_phrase in error_keywords:
+                    keyword_lower = keyword_phrase.lower()
+                    # Check if the keyword phrase appears in the full text
+                    if keyword_lower in full_text:
+                        # Additional validation: don't match if it's clearly not an error
+                        # Skip if we see success indicators alongside the keyword
+                        if "success" in full_text or "complete" in full_text:
+                            continue
+                        matches_error = True
+                        print(f"    [*] Matched error keyword: '{keyword_phrase}'")
+                        break
+                
+                if matches_error:
                     print(f"    [*] Found error dialog: '{win.window_text()}'")
                     if window_content:
                         print(f"    [*] Dialog content: '{window_content[:150]}...'")

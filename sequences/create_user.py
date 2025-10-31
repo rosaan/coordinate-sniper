@@ -92,17 +92,46 @@ def create_user(client_id: str, first_name: str, last_name: str,
             click(SAVE_BTN, delay=0.3)
             wait(2.0)  # Wait for either success or error dialog to appear
             
-            # Check for error dialog popup (check multiple times as dialogs may appear slowly)
+            # FIRST check if "Patient link code" window appeared (success!)
+            # Only check for errors if success window is NOT found
+            success_window_found = False
+            try:
+                test_link_window = app.window(title_re="Patient link code")
+                test_link_window.wait("exists", timeout=1.0)
+                success_window_found = True
+                print("    [✓] Success window found - no error!")
+            except Exception:
+                pass
+            
+            # Only check for SQL errors if success window was NOT found
             error_dialog_found = False
-            for check_attempt in range(3):
-                error_dialog_found = find_and_close_error_dialog(
-                    app, 
-                    error_keywords=["error", "sql", "mysql", "exception", "failed", "warning", "server", "gone away"],
-                    timeout=1.5
-                )
-                if error_dialog_found:
-                    break
-                wait(0.5)  # Wait before checking again
+            if not success_window_found:
+                # Check for error dialog popup with MORE SPECIFIC keywords
+                # Only match actual SQL/MySQL error messages, not generic warnings
+                for check_attempt in range(3):
+                    error_dialog_found = find_and_close_error_dialog(
+                        app, 
+                        error_keywords=[
+                            "mysql error",
+                            "sql error", 
+                            "database error",
+                            "mysql exception",
+                            "sql exception",
+                            "connection lost",
+                            "gone away",
+                            "mysql server",
+                            "access denied",
+                            "duplicate entry"
+                        ],
+                        timeout=1.5
+                    )
+                    if error_dialog_found:
+                        break
+                    wait(0.5)  # Wait before checking again
+            else:
+                # Success window found, no need to check for errors
+                link_dialog_ready = True
+                break
             
             if error_dialog_found:
                 print(f"    [!] MySQL/SQL error detected!")
@@ -134,27 +163,28 @@ def create_user(client_id: str, first_name: str, last_name: str,
                     print(f"    [✗] Error during delete: {e}")
                     raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: {str(e)}")
             
-            # Check if "Patient link code" window appeared (success!)
-            print("    [*] Waiting for 'Patient link code' window to appear...")
-            link_window = None
-            try:
-                # Wait for the window to appear
-                link_window = app.window(title_re="Patient link code")
-                link_window.wait("exists", timeout=5.0)
-                print("    [✓] 'Patient link code' window appeared - save successful!")
-                link_dialog_ready = True
-                break
-            except Exception:
-                # Window not found yet, wait and check again
-                wait(0.5)
+            # If no error was found, check again for "Patient link code" window (success!)
+            # This handles the case where success window appears after error check
+            if not error_dialog_found:
+                print("    [*] Waiting for 'Patient link code' window to appear...")
                 try:
+                    # Wait for the window to appear
                     link_window = app.window(title_re="Patient link code")
-                    link_window.wait("exists", timeout=3.0)
-                    print("    [✓] 'Patient link code' window appeared after extended wait - save successful!")
+                    link_window.wait("exists", timeout=5.0)
+                    print("    [✓] 'Patient link code' window appeared - save successful!")
                     link_dialog_ready = True
                     break
                 except Exception:
-                    pass
+                    # Window not found yet, wait and check again
+                    wait(0.5)
+                    try:
+                        link_window = app.window(title_re="Patient link code")
+                        link_window.wait("exists", timeout=3.0)
+                        print("    [✓] 'Patient link code' window appeared after extended wait - save successful!")
+                        link_dialog_ready = True
+                        break
+                    except Exception:
+                        pass
         
         # Final check - wait longer if window still not ready
         if link_window is None:
