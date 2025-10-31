@@ -1,9 +1,20 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { v7 as uuidv7 } from "uuid";
 
 /**
- * Create a new user. Only firstName is required. clientCode is auto-generated as UUIDv7.
+ * Generate a random 5-character alphanumeric code.
+ */
+function generateRandomCode(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let code = "";
+  for (let i = 0; i < 5; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+/**
+ * Create a new user. Only firstName is required. clientCode is auto-generated as unique 5-character code.
  */
 export const createUser = mutation({
   args: {
@@ -15,12 +26,37 @@ export const createUser = mutation({
   },
   returns: v.id("users"),
   handler: async (ctx, args) => {
-    // Auto-generate UUIDv7 for clientCode
-    const clientCode = uuidv7();
+    // Generate unique 5-character clientCode
+    let clientCode: string;
+    let isUnique = false;
+    let attempts = 0;
+    const maxAttempts = 100; // Prevent infinite loop
+
+    while (!isUnique && attempts < maxAttempts) {
+      clientCode = generateRandomCode();
+
+      // Check if code already exists
+      const existing = await ctx.db
+        .query("users")
+        .withIndex("by_clientCode", (q) => q.eq("clientCode", clientCode))
+        .first();
+
+      if (!existing) {
+        isUnique = true;
+      } else {
+        attempts++;
+      }
+    }
+
+    if (!isUnique) {
+      throw new Error(
+        "Failed to generate unique client code after multiple attempts"
+      );
+    }
 
     return await ctx.db.insert("users", {
       firstName: args.firstName,
-      clientCode: clientCode,
+      clientCode: clientCode!,
       lastName: args.lastName,
       telephone: args.telephone,
       email: args.email,

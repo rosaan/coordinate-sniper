@@ -10,5 +10,5 @@ export default defineSchema({
     email: v.optional(v.string()),
     recordingInstruction: v.optional(v.array(v.string())),
     isCreatedLocally: v.optional(v.boolean()),
-  }),
+  }).index("by_clientCode", ["clientCode"]),
 });
