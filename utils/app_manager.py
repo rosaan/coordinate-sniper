@@ -8,14 +8,15 @@ from pywinauto.findwindows import ElementNotFoundError
 from typing import Optional
 
 
-def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float = 2.0) -> Application:
+def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float = 5.0) -> Application:
     """
     Connect to a running application instance or start it if not running.
+    Optimized for slow laptops with extended startup delay.
     
     Args:
         exe_path: Full path to the executable
         backend: Pywinauto backend ('win32' or 'uia')
-        startup_delay: Delay after starting the application (in seconds)
+        startup_delay: Delay after starting the application (in seconds) - increased for slow laptops
         
     Returns:
         Application instance
@@ -28,14 +29,19 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
         try:
             app.connect(path=target)
             print(f"[+] Connected to {target}")
+            # Give time for app to stabilize even if already running
+            time.sleep(2)
             break
         except Exception:
             pass
     else:
         # Not running -> start it
-        print(f"[+] Starting {exe_path}")
+        print(f"[+] Starting {exe_path} (this may take a moment on slow systems)...")
         app = Application(backend=backend).start(exe_path)
+        # Extended delay for slow laptops to prevent crashes
         time.sleep(startup_delay)
+        print(f"[+] Application started, waiting for stabilization...")
+        time.sleep(3)  # Additional stabilization time
 
     return app
 

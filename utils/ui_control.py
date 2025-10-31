@@ -10,6 +10,10 @@ import platform
 import pyautogui
 import pyperclip
 from typing import Tuple, Optional, Callable
+# OCR/Tesseract is resource-intensive - only enable if needed
+# Set this to False to disable OCR and save resources on slow laptops
+OCR_ENABLED = False  # Disabled by default for slow laptops
+
 try:
     import pytesseract
     OCR_AVAILABLE = True
@@ -60,26 +64,27 @@ def right_click(coords: Tuple[float, float], delay: float = 0.1) -> None:
 
 
 def click_and_type(coords: Tuple[float, float], text: str, clear_first: bool = True, 
-                   type_interval: float = 0.02, delay: float = 0.1) -> None:
+                   type_interval: float = 0.05, delay: float = 0.5) -> None:
     """
     Click at coordinates and type text.
+    Optimized for slow laptops with slower typing intervals and longer delays.
     
     Args:
         coords: Tuple of (x, y) coordinates
         text: Text to type
         clear_first: Whether to clear existing text first (Ctrl+A, Backspace)
-        type_interval: Delay between keystrokes (in seconds)
-        delay: Delay after typing (in seconds)
+        type_interval: Delay between keystrokes (in seconds) - increased for slow laptops
+        delay: Delay after typing (in seconds) - increased for slow laptops
     """
     x, y = coords
     pyautogui.click(x, y)
-    time.sleep(0.1)
+    time.sleep(0.3)  # Increased wait for field focus
     
     if clear_first:
         pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.05)
+        time.sleep(0.2)  # Increased wait for selection
         pyautogui.press("backspace")
-        time.sleep(0.05)
+        time.sleep(0.2)  # Increased wait for clearing
     
     pyautogui.typewrite(text, interval=type_interval)
     if delay > 0:
@@ -130,6 +135,105 @@ def wait(seconds: float) -> None:
         seconds: Number of seconds to wait
     """
     time.sleep(seconds)
+
+
+def wait_for_pixel_change(coords: Tuple[float, float], 
+                         timeout: float = 10.0,
+                         check_interval: float = 0.3,
+                         initial_color: Optional[Tuple[int, int, int]] = None,
+                         min_change_threshold: int = 10) -> bool:
+    """
+    Wait until pixel color at coordinates changes (useful for detecting UI changes).
+    Lightweight alternative to OCR - just checks if pixel color changed.
+    
+    Args:
+        coords: Tuple of (x, y) coordinates to monitor
+        timeout: Maximum time to wait (in seconds)
+        check_interval: How often to check (in seconds)
+        initial_color: Initial RGB color to compare against. If None, uses first sample.
+        min_change_threshold: Minimum RGB difference to consider as change
+        
+    Returns:
+        True if pixel changed, False if timeout
+    """
+    x, y = int(coords[0]), int(coords[1])
+    start_time = time.time()
+    
+    # Get initial color if not provided
+    if initial_color is None:
+        try:
+            screenshot = pyautogui.screenshot()
+            initial_color = screenshot.getpixel((x, y))
+        except Exception:
+            # If we can't get initial color, just wait the timeout
+            time.sleep(timeout)
+            return False
+    
+    while time.time() - start_time < timeout:
+        try:
+            screenshot = pyautogui.screenshot()
+            current_color = screenshot.getpixel((x, y))
+            
+            # Check if color changed significantly
+            color_diff = sum(abs(a - b) for a, b in zip(current_color, initial_color))
+            if color_diff >= min_change_threshold:
+                return True
+        except Exception:
+            pass
+        
+        time.sleep(check_interval)
+    
+    return False
+
+
+def wait_for_element_ready(coords: Tuple[float, float], 
+                          timeout: float = 10.0,
+                          check_interval: float = 0.3,
+                          stable_duration: float = 0.5) -> bool:
+    """
+    Wait until element at coordinates appears/is ready by checking pixel stability.
+    Checks if pixel color stabilizes (doesn't change for stable_duration).
+    Lightweight alternative to OCR - detects when UI element is ready.
+    
+    Args:
+        coords: Tuple of (x, y) coordinates to monitor
+        timeout: Maximum time to wait (in seconds)
+        check_interval: How often to check (in seconds)
+        stable_duration: How long pixel must be stable to consider ready (in seconds)
+        
+    Returns:
+        True if element is ready, False if timeout
+    """
+    x, y = int(coords[0]), int(coords[1])
+    start_time = time.time()
+    last_color = None
+    color_stable_since = None
+    
+    while time.time() - start_time < timeout:
+        try:
+            screenshot = pyautogui.screenshot()
+            current_color = screenshot.getpixel((x, y))
+            
+            if last_color is None:
+                last_color = current_color
+                color_stable_since = time.time()
+            elif current_color == last_color:
+                # Color is stable
+                if color_stable_since is None:
+                    color_stable_since = time.time()
+                elif time.time() - color_stable_since >= stable_duration:
+                    # Color has been stable long enough
+                    return True
+            else:
+                # Color changed, reset stability timer
+                last_color = current_color
+                color_stable_since = time.time()
+        except Exception:
+            pass
+        
+        time.sleep(check_interval)
+    
+    return False
 
 
 def wait_for(condition: Callable[[], bool], timeout: float = 10.0, 
@@ -295,6 +399,7 @@ def find_text_on_screen(text: str, region: Optional[Tuple[int, int, int, int]] =
                        case_sensitive: bool = False, exact_match: bool = False) -> bool:
     """
     Check if specified text is visible on the screen using OCR.
+    NOTE: OCR is resource-intensive and disabled by default on slow laptops.
     
     Args:
         text: Text to search for
@@ -309,6 +414,11 @@ def find_text_on_screen(text: str, region: Optional[Tuple[int, int, int, int]] =
     Raises:
         ImportError: If pytesseract or PIL are not installed
     """
+    if not OCR_ENABLED:
+        raise RuntimeError(
+            "OCR is disabled to save resources on slow laptops. "
+            "Set OCR_ENABLED = True in utils/ui_control.py if you need OCR functionality."
+        )
     if not OCR_AVAILABLE:
         raise ImportError(
             "OCR functionality requires pytesseract and Pillow. "
@@ -344,9 +454,13 @@ def wait_for_text(text: str, timeout: float = 10.0,
                  region: Optional[Tuple[int, int, int, int]] = None,
                  case_sensitive: bool = False,
                  exact_match: bool = False,
-                 error_message: Optional[str] = None) -> bool:
+                 error_message: Optional[str] = None,
+                 use_ocr: Optional[bool] = None) -> bool:
     """
     Wait until specified text appears on the screen.
+    
+    By default, uses OCR if enabled. Can be forced to use OCR or use lightweight checks.
+    If OCR is disabled and use_ocr=None, will use a simple time-based wait (not text detection).
     
     Args:
         text: Text to wait for
@@ -357,32 +471,46 @@ def wait_for_text(text: str, timeout: float = 10.0,
         case_sensitive: Whether the search should be case-sensitive
         exact_match: If True, text must match exactly. If False, checks if text is contained.
         error_message: Optional error message to raise on timeout
+        use_ocr: If True, force OCR usage. If False, skip OCR and just wait.
+                 If None (default), use OCR if enabled, otherwise just wait.
         
     Returns:
-        True if text was found, False if timeout occurred
+        True if text was found (or wait completed if OCR disabled), False if timeout occurred
         
     Raises:
         TimeoutError: If timeout occurs and error_message is provided
-        ImportError: If pytesseract or PIL are not installed
+        RuntimeError: If OCR is required but disabled
     """
-    if not OCR_AVAILABLE:
-        raise ImportError(
-            "OCR functionality requires pytesseract and Pillow. "
-            "Install with: pip install pytesseract pillow"
-        )
+    # Determine if we should use OCR
+    should_use_ocr = use_ocr if use_ocr is not None else OCR_ENABLED
     
-    def check_text():
-        return find_text_on_screen(text, region, case_sensitive, exact_match)
-    
-    msg = error_message or f"Text '{text}' did not appear within {timeout} seconds"
-    return wait_for(check_text, timeout=timeout, check_interval=check_interval, 
-                   error_message=msg)
+    if should_use_ocr:
+        # Use OCR-based text detection
+        if not OCR_AVAILABLE:
+            raise ImportError(
+                "OCR functionality requires pytesseract and Pillow. "
+                "Install with: pip install pytesseract pillow"
+            )
+        
+        def check_text():
+            return find_text_on_screen(text, region, case_sensitive, exact_match)
+        
+        msg = error_message or f"Text '{text}' did not appear within {timeout} seconds"
+        return wait_for(check_text, timeout=timeout, check_interval=check_interval, 
+                       error_message=msg)
+    else:
+        # Lightweight mode: just wait for the timeout (no actual text detection)
+        # This is useful when OCR is disabled but you still want to wait
+        print(f"[*] OCR disabled - waiting {timeout}s (no text detection)")
+        time.sleep(timeout)
+        return True
 
 
 def find_text_location(text: str, region: Optional[Tuple[int, int, int, int]] = None,
                       case_sensitive: bool = False) -> Optional[Tuple[int, int, int, int]]:
     """
     Find the location of text on the screen using OCR.
+    NOTE: OCR is resource-intensive and disabled by default on slow laptops.
     
     Args:
         text: Text to search for
@@ -397,6 +525,11 @@ def find_text_location(text: str, region: Optional[Tuple[int, int, int, int]] = 
     Raises:
         ImportError: If pytesseract or PIL are not installed
     """
+    if not OCR_ENABLED:
+        raise RuntimeError(
+            "OCR is disabled to save resources on slow laptops. "
+            "Set OCR_ENABLED = True in utils/ui_control.py if you need OCR functionality."
+        )
     if not OCR_AVAILABLE:
         raise ImportError(
             "OCR functionality requires pytesseract and Pillow. "
@@ -442,6 +575,7 @@ def click_text(text: str, timeout: float = 10.0,
               case_sensitive: bool = False) -> bool:
     """
     Find and click on text on the screen.
+    NOTE: OCR is resource-intensive and disabled by default on slow laptops.
     
     Args:
         text: Text to click on
@@ -456,6 +590,11 @@ def click_text(text: str, timeout: float = 10.0,
     Raises:
         ImportError: If pytesseract or PIL are not installed
     """
+    if not OCR_ENABLED:
+        raise RuntimeError(
+            "OCR is disabled to save resources on slow laptops. "
+            "Set OCR_ENABLED = True in utils/ui_control.py if you need OCR functionality."
+        )
     if not OCR_AVAILABLE:
         raise ImportError(
             "OCR functionality requires pytesseract and Pillow. "
@@ -513,9 +652,11 @@ def wait_till_visible(text: str, timeout: float = 10.0,
         found = wait_till_visible("Done", return_bool=True)  # Returns True/False
     """
     msg = error_message or f"Text '{text}' did not appear within {timeout} seconds"
+    # Pass use_ocr=None to inherit OCR_ENABLED setting
     result = wait_for_text(text, timeout, check_interval, region, 
                           case_sensitive, exact_match, 
-                          error_message=msg if not return_bool else None)
+                          error_message=msg if not return_bool else None,
+                          use_ocr=None)
     
     if return_bool:
         return result
