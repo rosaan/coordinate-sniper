@@ -1,13 +1,13 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { v7 as uuidv7 } from "uuid";
 
 /**
- * Create a new user. Only firstName and clientCode are required.
+ * Create a new user. Only firstName is required. clientCode is auto-generated as UUIDv7.
  */
 export const createUser = mutation({
   args: {
     firstName: v.string(),
-    clientCode: v.string(),
     lastName: v.optional(v.string()),
     telephone: v.optional(v.string()),
     email: v.optional(v.string()),
@@ -15,9 +15,12 @@ export const createUser = mutation({
   },
   returns: v.id("users"),
   handler: async (ctx, args) => {
+    // Auto-generate UUIDv7 for clientCode
+    const clientCode = uuidv7();
+
     return await ctx.db.insert("users", {
       firstName: args.firstName,
-      clientCode: args.clientCode,
+      clientCode: clientCode,
       lastName: args.lastName,
       telephone: args.telephone,
       email: args.email,
