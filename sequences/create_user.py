@@ -1,7 +1,7 @@
 """
 Sequence for creating a new user in the VAEEG application.
 """
-from utils import click, click_and_type, wait, get_clipboard, wait_for_element_ready
+from utils import click, click_and_type, wait, get_clipboard, wait_for_element_ready, wait_for_clipboard_change
 from utils.app_manager import connect_or_start, bring_up_window
 
 # Coordinate definitions for the create user flow
@@ -77,15 +77,30 @@ def create_user(client_id: str, first_name: str, last_name: str,
         print("    [!] Dialog may not be ready, waiting additional time...")
         wait(3)  # Fallback wait
     
+    # Get current clipboard content before copying (to detect change)
+    clipboard_before = get_clipboard()
+    
     print("    [*] Copying recording link...")
     click(RECORDING_LINK_COPY, delay=0.5)
-    wait(2)  # Wait for clipboard to update
+    
+    # Wait for clipboard to actually change (not just wait fixed time)
+    print("    [*] Waiting for clipboard to update...")
+    try:
+        url = wait_for_clipboard_change(
+            initial_content=clipboard_before,
+            timeout=5.0,
+            check_interval=0.2
+        )
+        print(f"    [✓] Clipboard updated: {url[:50]}..." if len(url) > 50 else f"    [✓] Clipboard updated: {url}")
+    except TimeoutError:
+        print("    [!] Clipboard didn't change, trying to get current content...")
+        # Fallback: just get current clipboard
+        url = get_clipboard()
+        if url == clipboard_before:
+            print("    [✗] Warning: Clipboard content didn't change!")
     
     print("    [*] Closing link dialog...")
     click(CLOSE_LINK_CODE, delay=0.5)
     wait(1)  # Wait for dialog to close
-    
-    # Get the URL from clipboard
-    url = get_clipboard()
     
     return url

@@ -339,6 +339,38 @@ def click_image(image_path: str, confidence: float = 0.8,
     return wait_for(find_and_click, timeout=timeout)
 
 
+def wait_for_clipboard_change(initial_content: Optional[str] = None,
+                             timeout: float = 5.0,
+                             check_interval: float = 0.2) -> str:
+    """
+    Wait until clipboard content changes from initial_content (or any change if None).
+    Useful for waiting until a copy operation completes.
+    
+    Args:
+        initial_content: Initial clipboard content to compare against. 
+                        If None, uses current clipboard as baseline.
+        timeout: Maximum time to wait (in seconds)
+        check_interval: How often to check clipboard (in seconds)
+        
+    Returns:
+        New clipboard content
+        
+    Raises:
+        TimeoutError: If clipboard doesn't change within timeout
+    """
+    if initial_content is None:
+        initial_content = pyperclip.paste()
+    
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        current_content = pyperclip.paste()
+        if current_content != initial_content and current_content.strip():
+            return current_content
+        time.sleep(check_interval)
+    
+    raise TimeoutError(f"Clipboard did not change within {timeout} seconds")
+
+
 def get_clipboard() -> str:
     """
     Get the current clipboard contents.
