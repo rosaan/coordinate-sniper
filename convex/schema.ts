@@ -10,5 +10,7 @@ export default defineSchema({
     email: v.optional(v.string()),
     recordingInstruction: v.optional(v.array(v.string())),
     isCreatedLocally: v.optional(v.boolean()),
+    syncStatus: v.optional(v.string()), // Status: "pending", "processing", "completed", "failed", "client_id_mismatch", "delete_failed"
+    errorReason: v.optional(v.string()), // Detailed error message
   }).index("by_clientCode", ["clientCode"]),
 });

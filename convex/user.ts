@@ -81,12 +81,29 @@ export const listPendingUsers = query({
       email: v.optional(v.string()),
       recordingInstruction: v.optional(v.array(v.string())),
       isCreatedLocally: v.optional(v.boolean()),
+      syncStatus: v.optional(v.string()),
+      errorReason: v.optional(v.string()),
     })
   ),
   handler: async (ctx) => {
     const allUsers = await ctx.db.query("users").collect();
     // Filter users that haven't been created locally yet
-    return allUsers.filter((user) => user.isCreatedLocally !== true);
+    // Also exclude users with critical errors that need manual intervention
+    return allUsers.filter((user) => {
+      // Skip completed users
+      if (user.isCreatedLocally === true) {
+        return false;
+      }
+      // Skip users with critical errors (client_id_mismatch, delete_failed)
+      // These need manual intervention and shouldn't be retried automatically
+      if (
+        user.syncStatus === "client_id_mismatch" ||
+        user.syncStatus === "delete_failed"
+      ) {
+        return false;
+      }
+      return true;
+    });
   },
 });
 
@@ -107,6 +124,31 @@ export const updateRecordingLink = mutation({
     await ctx.db.patch(args.userId, {
       recordingInstruction: [args.recordingLink],
       isCreatedLocally: true,
+      syncStatus: "completed",
+      errorReason: undefined,
+    });
+    return null;
+  },
+});
+
+/**
+ * Update user sync status and error reason.
+ */
+export const updateSyncStatus = mutation({
+  args: {
+    userId: v.id("users"),
+    syncStatus: v.string(),
+    errorReason: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+    await ctx.db.patch(args.userId, {
+      syncStatus: args.syncStatus,
+      errorReason: args.errorReason,
     });
     return null;
   },

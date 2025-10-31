@@ -48,6 +48,15 @@ def process_user(user: Dict[str, Any], client: ConvexClient, db: LocalDB) -> Non
     # Mark as processing
     db.update_status(user_id, UserStatus.PROCESSING)
     
+    # Report processing status to backend
+    try:
+        client.mutation("user:updateSyncStatus", {
+            "userId": user_id,
+            "syncStatus": "processing"
+        })
+    except Exception:
+        pass  # Non-critical if this fails
+    
     print(f"\n[+] Processing user: {first_name} {last_name} (ID: {user_id})")
     print(f"    Client Code: {client_code} (5-char unique code)")
     
@@ -91,13 +100,79 @@ def process_user(user: Dict[str, Any], client: ConvexClient, db: LocalDB) -> Non
     except KeyboardInterrupt:
         # User wants to stop - reset status and re-raise
         db.update_status(user_id, UserStatus.PENDING, error_message="Interrupted by user")
+        try:
+            client.mutation("user:updateSyncStatus", {
+                "userId": user_id,
+                "syncStatus": "pending",
+                "errorReason": "Interrupted by user"
+            })
+        except Exception:
+            pass
         raise
+    except RuntimeError as e:
+        # Handle specific errors (like DELETE_FAILED, CLIENT_ID_MISMATCH)
+        error_msg = str(e)
+        print(f"    [✗] Error processing user {user_id}: {error_msg}")
+        
+        # Determine status based on error type
+        if "DELETE_FAILED" in error_msg or "CLIENT_ID_MISMATCH" in error_msg:
+            sync_status = "client_id_mismatch" if "CLIENT_ID_MISMATCH" in error_msg else "delete_failed"
+            print(f"    [*] Reporting failure to backend: {sync_status}")
+            
+            # Report to backend
+            try:
+                client.mutation("user:updateSyncStatus", {
+                    "userId": user_id,
+                    "syncStatus": sync_status,
+                    "errorReason": error_msg
+                })
+                print(f"    [✓] Status reported to backend")
+            except Exception as backend_error:
+                print(f"    [!] Failed to report status to backend: {backend_error}")
+            
+            # Update local DB
+            db.update_status(user_id, UserStatus.FAILED, error_message=error_msg)
+            print(f"    [*] User will NOT be retried - requires manual intervention")
+        else:
+            # Generic error - may retry
+            retry_count = db.increment_retry(user_id)
+            db.update_status(user_id, UserStatus.FAILED, error_message=error_msg)
+            
+            # Report to backend
+            try:
+                client.mutation("user:updateSyncStatus", {
+                    "userId": user_id,
+                    "syncStatus": "failed",
+                    "errorReason": error_msg
+                })
+            except Exception:
+                pass
+            
+            print(f"    Retry count: {retry_count}")
+            if retry_count < 3:
+                print(f"    [*] User will be retried on next sync cycle")
+            else:
+                print(f"    [!] Max retries reached. User will be skipped.")
+        
+        import traceback
+        traceback.print_exception(type(e), e, e.__traceback__)
     except Exception as e:
         error_msg = str(e)
         print(f"    [✗] Error processing user {user_id}: {error_msg}")
         print(f"    [*] This may be due to VAEEG crash or slow system response")
         retry_count = db.increment_retry(user_id)
         db.update_status(user_id, UserStatus.FAILED, error_message=error_msg)
+        
+        # Report to backend
+        try:
+            client.mutation("user:updateSyncStatus", {
+                "userId": user_id,
+                "syncStatus": "failed",
+                "errorReason": error_msg
+            })
+        except Exception:
+            pass
+        
         print(f"    Retry count: {retry_count}")
         if retry_count < 3:
             print(f"    [*] User will be retried on next sync cycle")

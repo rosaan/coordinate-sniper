@@ -3,6 +3,7 @@ Sequence for deleting a user in the VAEEG application.
 """
 import pyautogui
 import re
+import pyperclip
 from utils import click, click_and_type, wait, press_key
 from utils.app_manager import connect_or_start, bring_up_window, find_and_close_error_dialog
 
@@ -40,68 +41,122 @@ def clear_input_box(coords: tuple, backspace_count: int = 100) -> None:
     wait(0.3)
 
 
-def verify_client_id_at_coordinate(client_id: str, coord: tuple, region_size: int = 100) -> bool:
+def verify_client_id_at_coordinate(client_id: str, coord: tuple, app, max_attempts: int = 5) -> bool:
     """
     Verify that the client ID displayed at the specified coordinate matches the expected client_id.
+    Uses pywinauto to read text directly from the control (much more reliable than OCR for old Windows apps).
     This is a critical safety check before deletion.
     
     Args:
         client_id: Expected client ID to verify
         coord: Tuple of (x, y) coordinates to check
-        region_size: Size of region around coordinate to capture (default: 100 pixels)
+        app: Application instance (for pywinauto access)
+        max_attempts: Maximum number of attempts to read the text
         
     Returns:
         True if client ID matches, False otherwise
     """
-    try:
-        import pytesseract
-        from PIL import Image
-        
-        x, y = int(coord[0]), int(coord[1])
-        
-        # Capture a region around the coordinate
-        # Region: (left, top, width, height)
-        region = (
-            max(0, x - region_size // 2),
-            max(0, y - region_size // 2),
-            region_size,
-            region_size
-        )
-        
-        # Take screenshot of the region
-        screenshot = pyautogui.screenshot(region=region)
-        
-        # Extract text using OCR
+    x, y = int(coord[0]), int(coord[1])
+    
+    for attempt in range(max_attempts):
         try:
-            extracted_text = pytesseract.image_to_string(screenshot).strip()
-            print(f"    [*] Extracted text at CLIENT_ID coordinate: '{extracted_text}'")
+            # Method 1: Try to find control at coordinate using pywinauto
+            # Get the main window
+            windows = app.windows()
+            if not windows:
+                wait(0.5)
+                continue
             
-            # Normalize for comparison (remove spaces, convert to uppercase)
-            extracted_normalized = extracted_text.replace(" ", "").replace("-", "").upper()
-            expected_normalized = client_id.replace(" ", "").replace("-", "").upper()
+            # Try to find control at the coordinate
+            # We'll check all windows and their descendants
+            for win in windows:
+                try:
+                    # Get all child controls
+                    all_controls = win.descendants()
+                    
+                    for control in all_controls:
+                        try:
+                            # Get control rectangle
+                            rect = control.rectangle()
+                            control_x = rect.left + (rect.width() // 2)
+                            control_y = rect.top + (rect.height() // 2)
+                            
+                            # Check if coordinate is within this control
+                            if (rect.left <= x <= rect.right and 
+                                rect.top <= y <= rect.bottom):
+                                
+                                # Try to get text from this control
+                                control_text = control.window_text().strip()
+                                
+                                if control_text:
+                                    print(f"    [*] Found text at coordinate: '{control_text}'")
+                                    
+                                    # Normalize for comparison
+                                    extracted_normalized = control_text.replace(" ", "").replace("-", "").upper()
+                                    expected_normalized = client_id.replace(" ", "").replace("-", "").upper()
+                                    
+                                    # Check if they match
+                                    if extracted_normalized == expected_normalized:
+                                        print(f"    [✓] Client ID verified: '{control_text}' matches '{client_id}'")
+                                        return True
+                                    else:
+                                        print(f"    [✗] Client ID mismatch!")
+                                        print(f"    [*] Expected: '{client_id}'")
+                                        print(f"    [*] Found at coordinate: '{control_text}'")
+                                        return False
+                        except Exception:
+                            continue
+                except Exception:
+                    continue
             
-            # Check if they match
-            if extracted_normalized == expected_normalized:
-                print(f"    [✓] Client ID verified: '{extracted_text}' matches '{client_id}'")
-                return True
-            else:
-                print(f"    [✗] Client ID mismatch!")
-                print(f"    [*] Expected: '{client_id}'")
-                print(f"    [*] Found at coordinate: '{extracted_text}'")
-                return False
+            # Method 2: Try clicking at coordinate and reading clipboard/selected text
+            # Click at coordinate to select/focus the control
+            pyautogui.click(x, y)
+            wait(0.3)
+            
+            # Try to select all and copy
+            pyautogui.hotkey("ctrl", "a")
+            wait(0.2)
+            pyautogui.hotkey("ctrl", "c")
+            wait(0.3)
+            
+            # Read from clipboard
+            try:
+                clipboard_text = pyperclip.paste().strip()
+                
+                if clipboard_text:
+                    print(f"    [*] Found text via clipboard: '{clipboard_text}'")
+                    
+                    # Normalize for comparison
+                    extracted_normalized = clipboard_text.replace(" ", "").replace("-", "").upper()
+                    expected_normalized = client_id.replace(" ", "").replace("-", "").upper()
+                    
+                    if extracted_normalized == expected_normalized:
+                        print(f"    [✓] Client ID verified: '{clipboard_text}' matches '{client_id}'")
+                        return True
+                    else:
+                        print(f"    [✗] Client ID mismatch!")
+                        print(f"    [*] Expected: '{client_id}'")
+                        print(f"    [*] Found: '{clipboard_text}'")
+                        return False
+            except Exception:
+                pass
+            
+            # Wait before retry
+            if attempt < max_attempts - 1:
+                wait(0.5)
+                continue
+                
         except Exception as e:
-            print(f"    [✗] OCR error during verification: {e}")
-            print(f"    [*] Cannot verify client ID - aborting deletion for safety")
-            return False
-            
-    except ImportError:
-        print(f"    [✗] OCR not available - cannot verify client ID")
-        print(f"    [*] Aborting deletion for safety")
-        return False
-    except Exception as e:
-        print(f"    [✗] Error during client ID verification: {e}")
-        print(f"    [*] Aborting deletion for safety")
-        return False
+            print(f"    [!] Attempt {attempt + 1}/{max_attempts} failed: {e}")
+            if attempt < max_attempts - 1:
+                wait(0.5)
+                continue
+    
+    # If all methods failed, abort for safety
+    print(f"    [✗] Could not verify client ID after {max_attempts} attempts")
+    print(f"    [*] Aborting deletion for safety - cannot confirm correct user")
+    return False
 
 
 def click_yes_on_dialog(app, timeout: float = 2.0) -> bool:
@@ -207,10 +262,17 @@ def delete_user(client_id: str,
     
     # CRITICAL SAFETY CHECK: Verify client ID at CLIENT_ID coordinate matches
     print(f"    [*] Verifying client ID at CLIENT_ID coordinate before deletion...")
-    if not verify_client_id_at_coordinate(client_id, CLIENT_ID_COORD):
+    wait(1)  # Give UI time to update after search
+    if not verify_client_id_at_coordinate(client_id, CLIENT_ID_COORD, app):
         print(f"    [✗] ABORT: Client ID verification failed - deletion aborted for safety!")
         print(f"    [*] Expected '{client_id}' but found different value at coordinate")
-        return False
+        print(f"    [*] Clearing search and aborting - will NOT proceed with deletion")
+        # Clear the search input before aborting
+        click(search_client_input, delay=0.5)
+        wait(0.3)
+        clear_input_box(search_client_input, backspace_count=100)
+        # Raise exception with specific error code so sync_engine can report it
+        raise RuntimeError(f"CLIENT_ID_MISMATCH: Expected '{client_id}' but found different value at coordinate {CLIENT_ID_COORD}")
     
     # Step 4: Click delete button (only if verification passed)
     print("    [*] Client ID verified - proceeding with deletion...")
@@ -235,6 +297,28 @@ def delete_user(client_id: str,
     clear_input_box(search_client_input, backspace_count=100)
     wait(0.5)
     
-    print("    [✓] User deletion completed")
+    # Final verification: Make sure deletion actually completed
+    # Clear the search and verify the user is gone
+    print("    [*] Verifying deletion completed...")
+    wait(1)
+    
+    # Try to search for the client ID again - should not find it
+    click(search_client_input, delay=0.5)
+    wait(0.3)
+    clear_input_box(search_client_input, backspace_count=100)
+    wait(0.3)
+    click_and_type(search_client_input, client_id, clear_first=False, type_interval=0.05, delay=1.5)
+    wait(2)
+    
+    # Check if client ID still exists at coordinate
+    if verify_client_id_at_coordinate(client_id, CLIENT_ID_COORD, app):
+        print(f"    [!] WARNING: Client ID still found after deletion - deletion may have failed")
+        # Clear search
+        click(search_client_input, delay=0.5)
+        wait(0.3)
+        clear_input_box(search_client_input, backspace_count=100)
+        raise RuntimeError(f"DELETE_FAILED: User with client ID '{client_id}' still exists after deletion attempt")
+    
+    print("    [✓] User deletion completed and verified")
     return True
 

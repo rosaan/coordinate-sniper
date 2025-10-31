@@ -94,7 +94,13 @@ def create_user(client_id: str, first_name: str, last_name: str,
             
             try:
                 # Delete the user that caused the error
-                delete_user(client_id, exe_path, window_title_regex)
+                delete_success = delete_user(client_id, exe_path, window_title_regex)
+                
+                if not delete_success:
+                    print(f"    [✗] Delete operation failed or was aborted!")
+                    print(f"    [*] Cannot proceed with retry - aborting user creation")
+                    raise RuntimeError(f"Delete operation failed - cannot retry user creation")
+                
                 wait(2)  # Wait after deletion
                 
                 # Re-open the create user form
@@ -114,11 +120,17 @@ def create_user(client_id: str, first_name: str, last_name: str,
                 print("    [*] Retrying save after deletion...")
                 # Continue to next iteration to try save again
                 continue
+            except RuntimeError as e:
+                # This is a specific error from delete failure or mismatch
+                error_msg = str(e)
+                print(f"    [✗] Error during delete/retry: {error_msg}")
+                print(f"    [✗] Cannot retry - aborting user creation sequence")
+                # Raise a specific exception that sync_engine can catch
+                raise RuntimeError(f"DELETE_FAILED: {error_msg}")
             except Exception as e:
-                print(f"    [✗] Error during delete/retry: {e}")
-                print("    [*] Will retry save anyway...")
-                wait(1)
-                continue
+                print(f"    [✗] Unexpected error during delete/retry: {e}")
+                print(f"    [✗] Cannot retry - aborting user creation sequence")
+                raise RuntimeError(f"DELETE_FAILED: {str(e)}")
         
         # Check if link dialog appeared (success!)
         print("    [*] Checking if link dialog appeared...")
