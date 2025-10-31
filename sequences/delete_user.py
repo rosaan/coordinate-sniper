@@ -7,6 +7,7 @@ from utils import click, click_and_type, wait, press_key
 from utils.app_manager import connect_or_start, bring_up_window, find_and_close_error_dialog
 
 # Coordinate definitions for the delete user flow
+cancel_button = (600.0, 202.5)
 search_client_input = (222.5, 208.75)
 delete_button = (757.5, 203.75)
 CLIENT_ID_COORD = (436.25, 380.0)  # Coordinate to verify client ID matches
@@ -183,6 +184,11 @@ def delete_user(client_id: str,
     
     # Give the app extra time to stabilize after startup (critical for slow laptops)
     wait(3)
+
+    # Step 0: Cancel the create
+    print("    [*] Cancelling create...")
+    click(cancel_button, delay=0.5)
+    wait(2)  # Wait for cancel dialog
     
     # Step 1: Click search_client_input
     print("    [*] Clicking search client input...")
