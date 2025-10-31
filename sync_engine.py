@@ -110,12 +110,31 @@ def process_user(user: Dict[str, Any], client: ConvexClient, db: LocalDB) -> Non
             pass
         raise
     except RuntimeError as e:
-        # Handle specific errors (like DELETE_FAILED, CLIENT_ID_MISMATCH)
+        # Handle specific errors (like DELETE_FAILED, CLIENT_ID_MISMATCH, MYSQL_ERROR_DELETED)
         error_msg = str(e)
         print(f"    [✗] Error processing user {user_id}: {error_msg}")
         
         # Determine status based on error type
-        if "DELETE_FAILED" in error_msg or "CLIENT_ID_MISMATCH" in error_msg:
+        if "MYSQL_ERROR_DELETED" in error_msg:
+            # MySQL error - user already deleted from VAEEG and local DB
+            sync_status = "mysql_error_deleted"
+            print(f"    [*] Reporting MySQL error to backend: {sync_status}")
+            
+            # Report to backend
+            try:
+                client.mutation("user:updateSyncStatus", {
+                    "userId": user_id,
+                    "syncStatus": sync_status,
+                    "errorReason": error_msg
+                })
+                print(f"    [✓] Status reported to backend")
+            except Exception as backend_error:
+                print(f"    [!] Failed to report status to backend: {backend_error}")
+            
+            # User already removed from local DB, so no need to update
+            print(f"    [*] User deleted and removed - will NOT be retried")
+            
+        elif "DELETE_FAILED" in error_msg or "CLIENT_ID_MISMATCH" in error_msg:
             sync_status = "client_id_mismatch" if "CLIENT_ID_MISMATCH" in error_msg else "delete_failed"
             print(f"    [*] Reporting failure to backend: {sync_status}")
             

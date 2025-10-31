@@ -248,6 +248,21 @@ class LocalDB:
         conn.commit()
         conn.close()
     
+    def delete_user(self, user_id: str) -> None:
+        """
+        Delete a user from local database.
+        
+        Args:
+            user_id: Convex user ID
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        
+        conn.commit()
+        conn.close()
+    
     def cleanup_old_records(self, days: int = 30) -> int:
         """
         Clean up old completed records.

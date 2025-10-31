@@ -94,11 +94,12 @@ export const listPendingUsers = query({
       if (user.isCreatedLocally === true) {
         return false;
       }
-      // Skip users with critical errors (client_id_mismatch, delete_failed)
+      // Skip users with critical errors (client_id_mismatch, delete_failed, mysql_error_deleted)
       // These need manual intervention and shouldn't be retried automatically
       if (
         user.syncStatus === "client_id_mismatch" ||
-        user.syncStatus === "delete_failed"
+        user.syncStatus === "delete_failed" ||
+        user.syncStatus === "mysql_error_deleted"
       ) {
         return false;
       }

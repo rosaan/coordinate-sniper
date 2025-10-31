@@ -89,94 +89,81 @@ def create_user(client_id: str, first_name: str, last_name: str,
             wait(1)  # Wait before checking again
         
         if error_dialog_found:
-            print(f"    [!] SQL error detected! Need to delete user and retry...")
-            print(f"    [*] Deleting user with client ID: {client_id}")
+            print(f"    [!] MySQL/SQL error detected!")
+            print(f"    [*] Deleting user with client ID: {client_id} from VAEEG...")
             
             try:
                 # Delete the user that caused the error
                 delete_success = delete_user(client_id, exe_path, window_title_regex)
                 
                 if not delete_success:
-                    print(f"    [✗] Delete operation failed or was aborted!")
-                    print(f"    [*] Cannot proceed with retry - aborting user creation")
-                    raise RuntimeError(f"Delete operation failed - cannot retry user creation")
+                    print(f"    [✗] Delete operation failed!")
+                    raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: Could not delete user from VAEEG")
                 
-                wait(2)  # Wait after deletion
+                print(f"    [✓] User deleted from VAEEG successfully")
+                print(f"    [*] MySQL error occurred - user deleted and will be removed from local DB")
+                print(f"    [*] No retry - reporting to backend")
                 
-                # Re-open the create user form
-                print("    [*] Re-opening create user form...")
-                click(CREATE_USER_BTN, delay=0.5)
-                wait(2)  # Wait for form to load
+                # Raise exception to signal sync_engine to delete from local DB and report
+                error_reason = f"MySQL error occurred. User deleted from VAEEG. Client ID: {client_id}"
+                raise RuntimeError(f"MYSQL_ERROR_DELETED: {error_reason}")
                 
-                # Re-fill the form
-                print("    [*] Re-filling form fields...")
-                click_and_type(CLIENT_ID, client_id, type_interval=0.05, delay=1.5)
-                wait(1)
-                click_and_type(FIRST_NAME, first_name, type_interval=0.05, delay=1.5)
-                wait(1)
-                click_and_type(LAST_NAME, last_name, type_interval=0.05, delay=1.5)
-                wait(1)
-                
-                print("    [*] Retrying save after deletion...")
-                # Continue to next iteration to try save again
-                continue
             except RuntimeError as e:
-                # This is a specific error from delete failure or mismatch
-                error_msg = str(e)
-                print(f"    [✗] Error during delete/retry: {error_msg}")
-                print(f"    [✗] Cannot retry - aborting user creation sequence")
-                # Raise a specific exception that sync_engine can catch
-                raise RuntimeError(f"DELETE_FAILED: {error_msg}")
+                # Re-raise if it's already our error
+                if "MYSQL_ERROR" in str(e):
+                    raise
+                # Otherwise wrap it
+                raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: {str(e)}")
             except Exception as e:
-                print(f"    [✗] Unexpected error during delete/retry: {e}")
-                print(f"    [✗] Cannot retry - aborting user creation sequence")
-                raise RuntimeError(f"DELETE_FAILED: {str(e)}")
+                print(f"    [✗] Error during delete: {e}")
+                raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: {str(e)}")
         
-        # Check if link dialog appeared (success!)
-        print("    [*] Checking if link dialog appeared...")
-        link_dialog_ready = wait_for_element_ready(
-            RECORDING_LINK_COPY, 
-            timeout=3.0,  # Quick check
-            check_interval=0.3,
-            stable_duration=0.5
-        )
-        
-        if link_dialog_ready:
-            print("    [✓] Link dialog appeared - save successful!")
+        # Check if "Patient link code" window appeared (success!)
+        print("    [*] Waiting for 'Patient link code' window to appear...")
+        link_window = None
+        try:
+            # Wait for the window to appear
+            link_window = app.window(title_re="Patient link code")
+            link_window.wait("exists", timeout=10.0)
+            print("    [✓] 'Patient link code' window appeared - save successful!")
             break
-        else:
-            # Wait a bit more and check again (in case it's slow)
+        except Exception:
+            # Window not found yet, wait and check again
             wait(2)
-            link_dialog_ready = wait_for_element_ready(
-                RECORDING_LINK_COPY, 
-                timeout=2.0,
-                check_interval=0.3,
-                stable_duration=0.5
-            )
-            if link_dialog_ready:
-                print("    [✓] Link dialog appeared after extended wait - save successful!")
+            try:
+                link_window = app.window(title_re="Patient link code")
+                link_window.wait("exists", timeout=5.0)
+                print("    [✓] 'Patient link code' window appeared after extended wait - save successful!")
                 break
+            except Exception:
+                pass
     
-    # Final check - wait longer if dialog still not ready
-    if not link_dialog_ready:
-        print("    [*] Waiting for link dialog to appear (extended wait)...")
-        link_dialog_ready = wait_for_element_ready(
-            RECORDING_LINK_COPY, 
-            timeout=10.0,  # Extended timeout for slow laptops
-            check_interval=0.5,
-            stable_duration=1.0  # Dialog must be stable for 1 second
-        )
-        
-        if not link_dialog_ready:
-            print("    [!] Link dialog may not be ready, waiting additional time...")
-            wait(3)  # Fallback wait
-            # Check one more time
-            link_dialog_ready = wait_for_element_ready(
-                RECORDING_LINK_COPY, 
-                timeout=5.0,
-                check_interval=0.5,
-                stable_duration=0.5
-            )
+    # Final check - wait longer if window still not ready
+    if link_window is None:
+        print("    [*] Waiting for 'Patient link code' window (extended wait)...")
+        try:
+            link_window = app.window(title_re="Patient link code")
+            link_window.wait("exists", timeout=15.0)
+            print("    [✓] 'Patient link code' window found")
+        except Exception as e:
+            print(f"    [!] 'Patient link code' window not found: {e}")
+            raise RuntimeError("Failed to find 'Patient link code' window after save")
+    
+    # Focus the "Patient link code" window
+    print("    [*] Focusing 'Patient link code' window...")
+    try:
+        link_window.set_focus()
+        link_window.wait("visible enabled", timeout=5.0)
+        wait(1)  # Give window time to fully focus
+        print("    [✓] Window focused")
+    except Exception as e:
+        print(f"    [!] Warning: Could not focus window: {e}")
+        # Try to bring it up using bring_up_window method
+        try:
+            bring_up_window(app, "Patient link code", timeout=5.0, maximize=False)
+            wait(1)
+        except Exception:
+            pass
     
     # Get current clipboard content before copying (to detect change)
     clipboard_before = get_clipboard()
@@ -187,7 +174,8 @@ def create_user(client_id: str, first_name: str, last_name: str,
     last_name_lower = last_name.lower().strip() if last_name else ""
     print(f"    [*] Will verify clipboard contains: '{first_name}' or '{last_name}'")
     
-    print("    [*] Copying recording link...")
+    # Click copy button in the "Patient link code" window
+    print("    [*] Clicking copy button in 'Patient link code' window...")
     click(RECORDING_LINK_COPY, delay=0.5)
     wait(0.5)  # Give copy operation time to complete
     
