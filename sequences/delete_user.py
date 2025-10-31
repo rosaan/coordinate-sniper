@@ -41,16 +41,15 @@ def clear_input_box(coords: tuple, backspace_count: int = 100) -> None:
     wait(0.3)
 
 
-def verify_client_id_at_coordinate(client_id: str, coord: tuple, app, max_attempts: int = 5) -> bool:
+def verify_client_id_at_coordinate(client_id: str, coord: tuple, max_attempts: int = 3) -> bool:
     """
     Verify that the client ID displayed at the specified coordinate matches the expected client_id.
-    Uses pywinauto to read text directly from the control (much more reliable than OCR for old Windows apps).
+    Simple and reliable method: click coordinate, double-click to select, copy, verify clipboard.
     This is a critical safety check before deletion.
     
     Args:
         client_id: Expected client ID to verify
         coord: Tuple of (x, y) coordinates to check
-        app: Application instance (for pywinauto access)
         max_attempts: Maximum number of attempts to read the text
         
     Returns:
@@ -60,92 +59,48 @@ def verify_client_id_at_coordinate(client_id: str, coord: tuple, app, max_attemp
     
     for attempt in range(max_attempts):
         try:
-            # Method 1: Try to find control at coordinate using pywinauto
-            # Get the main window
-            windows = app.windows()
-            if not windows:
-                wait(0.5)
-                continue
-            
-            # Try to find control at the coordinate
-            # We'll check all windows and their descendants
-            for win in windows:
-                try:
-                    # Get all child controls
-                    all_controls = win.descendants()
-                    
-                    for control in all_controls:
-                        try:
-                            # Get control rectangle
-                            rect = control.rectangle()
-                            control_x = rect.left + (rect.width() // 2)
-                            control_y = rect.top + (rect.height() // 2)
-                            
-                            # Check if coordinate is within this control
-                            if (rect.left <= x <= rect.right and 
-                                rect.top <= y <= rect.bottom):
-                                
-                                # Try to get text from this control
-                                control_text = control.window_text().strip()
-                                
-                                if control_text:
-                                    print(f"    [*] Found text at coordinate: '{control_text}'")
-                                    
-                                    # Normalize for comparison
-                                    extracted_normalized = control_text.replace(" ", "").replace("-", "").upper()
-                                    expected_normalized = client_id.replace(" ", "").replace("-", "").upper()
-                                    
-                                    # Check if they match
-                                    if extracted_normalized == expected_normalized:
-                                        print(f"    [✓] Client ID verified: '{control_text}' matches '{client_id}'")
-                                        return True
-                                    else:
-                                        print(f"    [✗] Client ID mismatch!")
-                                        print(f"    [*] Expected: '{client_id}'")
-                                        print(f"    [*] Found at coordinate: '{control_text}'")
-                                        return False
-                        except Exception:
-                            continue
-                except Exception:
-                    continue
-            
-            # Method 2: Try clicking at coordinate and reading clipboard/selected text
-            # Click at coordinate to select/focus the control
+            # Step 1: Click at coordinate to focus
+            print(f"    [*] Clicking at CLIENT_ID coordinate ({x}, {y})...")
             pyautogui.click(x, y)
             wait(0.3)
             
-            # Try to select all and copy
-            pyautogui.hotkey("ctrl", "a")
-            wait(0.2)
-            pyautogui.hotkey("ctrl", "c")
+            # Step 2: Double-click to select the text
+            print(f"    [*] Double-clicking to select text...")
+            pyautogui.doubleClick(x, y)
             wait(0.3)
             
-            # Read from clipboard
-            try:
-                clipboard_text = pyperclip.paste().strip()
-                
-                if clipboard_text:
-                    print(f"    [*] Found text via clipboard: '{clipboard_text}'")
-                    
-                    # Normalize for comparison
-                    extracted_normalized = clipboard_text.replace(" ", "").replace("-", "").upper()
-                    expected_normalized = client_id.replace(" ", "").replace("-", "").upper()
-                    
-                    if extracted_normalized == expected_normalized:
-                        print(f"    [✓] Client ID verified: '{clipboard_text}' matches '{client_id}'")
-                        return True
-                    else:
-                        print(f"    [✗] Client ID mismatch!")
-                        print(f"    [*] Expected: '{client_id}'")
-                        print(f"    [*] Found: '{clipboard_text}'")
-                        return False
-            except Exception:
-                pass
+            # Step 3: Copy to clipboard
+            print(f"    [*] Copying selected text...")
+            pyautogui.hotkey("ctrl", "c")
+            wait(0.4)  # Give clipboard time to update
             
-            # Wait before retry
-            if attempt < max_attempts - 1:
-                wait(0.5)
-                continue
+            # Step 4: Read from clipboard and verify
+            clipboard_text = pyperclip.paste().strip()
+            
+            if clipboard_text:
+                print(f"    [*] Clipboard text: '{clipboard_text}'")
+                
+                # Normalize for comparison (remove spaces, dashes, convert to uppercase)
+                extracted_normalized = clipboard_text.replace(" ", "").replace("-", "").upper()
+                expected_normalized = client_id.replace(" ", "").replace("-", "").upper()
+                
+                # Check if they match
+                if extracted_normalized == expected_normalized:
+                    print(f"    [✓] Client ID verified: '{clipboard_text}' matches '{client_id}'")
+                    return True
+                else:
+                    print(f"    [✗] Client ID mismatch!")
+                    print(f"    [*] Expected: '{client_id}'")
+                    print(f"    [*] Found at coordinate: '{clipboard_text}'")
+                    return False
+            else:
+                print(f"    [!] Clipboard is empty - text may not be selectable")
+                if attempt < max_attempts - 1:
+                    wait(0.5)
+                    continue
+                else:
+                    print(f"    [✗] Could not read text from coordinate after {max_attempts} attempts")
+                    return False
                 
         except Exception as e:
             print(f"    [!] Attempt {attempt + 1}/{max_attempts} failed: {e}")
@@ -153,7 +108,7 @@ def verify_client_id_at_coordinate(client_id: str, coord: tuple, app, max_attemp
                 wait(0.5)
                 continue
     
-    # If all methods failed, abort for safety
+    # If all attempts failed, abort for safety
     print(f"    [✗] Could not verify client ID after {max_attempts} attempts")
     print(f"    [*] Aborting deletion for safety - cannot confirm correct user")
     return False
@@ -263,7 +218,7 @@ def delete_user(client_id: str,
     # CRITICAL SAFETY CHECK: Verify client ID at CLIENT_ID coordinate matches
     print(f"    [*] Verifying client ID at CLIENT_ID coordinate before deletion...")
     wait(1)  # Give UI time to update after search
-    if not verify_client_id_at_coordinate(client_id, CLIENT_ID_COORD, app):
+    if not verify_client_id_at_coordinate(client_id, CLIENT_ID_COORD):
         print(f"    [✗] ABORT: Client ID verification failed - deletion aborted for safety!")
         print(f"    [*] Expected '{client_id}' but found different value at coordinate")
         print(f"    [*] Clearing search and aborting - will NOT proceed with deletion")
@@ -311,7 +266,7 @@ def delete_user(client_id: str,
     wait(2)
     
     # Check if client ID still exists at coordinate
-    if verify_client_id_at_coordinate(client_id, CLIENT_ID_COORD, app):
+    if verify_client_id_at_coordinate(client_id, CLIENT_ID_COORD):
         print(f"    [!] WARNING: Client ID still found after deletion - deletion may have failed")
         # Clear search
         click(search_client_input, delay=0.5)
