@@ -1,5 +1,5 @@
 import { query, mutation } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 
 /**
  * Generate a random 5-character alphanumeric code.
@@ -210,11 +210,15 @@ export const retryUser = mutation({
   handler: async (ctx, args) => {
     const user = await ctx.db.get(args.userId);
     if (!user) {
-      throw new Error("User not found");
+      throw new ConvexError("User not found");
     }
 
-    if (user.syncStatus === "processing") {
-      throw new Error("Cannot retry while processing");
+    console.log("user", user);
+
+    if (user.syncStatus === "processing" || user.syncStatus === "completed") {
+      throw new ConvexError(
+        "Cannot retry while user is being processed or completed"
+      );
     }
 
     await ctx.db.patch(args.userId, {
