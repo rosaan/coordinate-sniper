@@ -3,7 +3,6 @@ pywinauto==0.6.9
 pyautogui==0.9.54
 pywin32==311
 pytesseract==0.3.10
-Pillow==10.1.0
 convex==0.7.0
 python-dotenv==1.2.1
 pymysql==1.1.0
