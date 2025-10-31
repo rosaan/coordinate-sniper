@@ -11,7 +11,8 @@ from typing import Optional, List
 
 def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float = 5.0) -> Application:
     """
-    Connect to a running application instance or start it if not running.
+    Ensure fresh launch of VAEEG application - closes existing instances if running, then starts fresh.
+    Handles login sequence: password entry, login button, and confirmation dialog.
     Optimized for slow laptops with extended startup delay.
     
     Args:
@@ -25,25 +26,126 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
     exe_name = os.path.basename(exe_path)
     app = Application(backend=backend)
 
-    # Try to connect to already running instance
+    # Always ensure fresh launch - close existing instances first
+    print("[+] Ensuring fresh launch - checking for existing instances...")
     for target in (exe_path, exe_name):
         try:
-            app.connect(path=target)
-            print(f"[+] Connected to {target}")
-            # Give time for app to stabilize even if already running
-            time.sleep(2)
+            existing_app = Application(backend=backend)
+            existing_app.connect(path=target)
+            print(f"[+] Found existing instance, closing it...")
+            # Close all windows
+            try:
+                windows = existing_app.windows()
+                for win in windows:
+                    try:
+                        win.close()
+                        time.sleep(0.3)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # Kill the process
+            try:
+                existing_app.kill()
+                print(f"[+] Closed existing instance")
+                time.sleep(2)  # Wait for process to fully close
+            except Exception:
+                # Fallback: use taskkill
+                try:
+                    import subprocess
+                    subprocess.run(["taskkill", "/F", "/IM", exe_name], 
+                                 capture_output=True, timeout=5)
+                    print(f"[+] Closed existing instance (via taskkill)")
+                    time.sleep(2)
+                except Exception:
+                    pass
             break
         except Exception:
             pass
-    else:
-        # Not running -> start it
-        print(f"[+] Starting {exe_path} (this may take a moment on slow systems)...")
-        app = Application(backend=backend).start(exe_path)
-        # Extended delay for slow laptops to prevent crashes
-        time.sleep(startup_delay)
-        print(f"[+] Application started, waiting for stabilization...")
-        time.sleep(3)  # Additional stabilization time
-
+    
+    # Start fresh instance
+    print(f"[+] Starting fresh instance: {exe_path} (this may take a moment on slow systems)...")
+    app = Application(backend=backend).start(exe_path)
+    # Extended delay for slow laptops to prevent crashes
+    time.sleep(startup_delay)
+    print(f"[+] Application started, waiting for login screen...")
+    time.sleep(3)  # Additional stabilization time
+    
+    # Handle login sequence
+    print("[+] Starting login sequence...")
+    import pyautogui
+    
+    # Step 1: Click password field and enter "1"
+    password_coord = (882.5, 582.5)
+    print(f"    [*] Clicking password field at {password_coord}...")
+    pyautogui.click(password_coord[0], password_coord[1])
+    time.sleep(0.5)
+    print("    [*] Entering password '1'...")
+    pyautogui.typewrite("1", interval=0.1)
+    time.sleep(0.5)
+    
+    # Step 2: Click login button
+    login_button_coord = (892.5, 648.75)
+    print(f"    [*] Clicking login button at {login_button_coord}...")
+    pyautogui.click(login_button_coord[0], login_button_coord[1])
+    time.sleep(2)  # Wait for confirm dialog
+    
+    # Step 3: Wait for "Confirm" dialog and click No
+    print("    [*] Waiting for 'Confirm' dialog...")
+    confirm_dialog = None
+    max_wait = 10
+    for attempt in range(max_wait):
+        try:
+            confirm_dialog = app.window(title_re="Confirm")
+            confirm_dialog.wait("exists", timeout=2.0)
+            print("    [✓] 'Confirm' dialog found")
+            break
+        except Exception:
+            if attempt < max_wait - 1:
+                time.sleep(0.5)
+            else:
+                print("    [!] 'Confirm' dialog not found, continuing anyway...")
+    
+    if confirm_dialog:
+        print("    [*] Clicking 'No' on Confirm dialog...")
+        try:
+            # Try to find No button
+            no_button = confirm_dialog.child_window(title_re=re.compile("no", re.I))
+            if no_button.exists():
+                no_button.click()
+                time.sleep(0.5)
+            else:
+                # Fallback: press N key (often selects No)
+                confirm_dialog.type_keys("N")
+                time.sleep(0.5)
+        except Exception:
+            # Fallback: press N key
+            try:
+                confirm_dialog.type_keys("N")
+                time.sleep(0.5)
+            except Exception:
+                print("    [!] Could not click No, trying Escape...")
+                confirm_dialog.type_keys("{ESC}")
+                time.sleep(0.5)
+    
+    # Step 4: Wait for main app window "VAEEG - [Client]" to load
+    print("    [*] Waiting for main app window 'VAEEG - [Client]' to load...")
+    main_window = None
+    for attempt in range(20):  # Up to 20 seconds
+        try:
+            main_window = app.window(title_re="VAEEG - \\[Client\\]")
+            main_window.wait("exists", timeout=1.0)
+            print("    [✓] Main app window loaded")
+            break
+        except Exception:
+            if attempt < 19:
+                time.sleep(1)
+            else:
+                raise RuntimeError("Main app window 'VAEEG - [Client]' did not appear after login")
+    
+    print("[+] Login sequence completed, app is ready")
+    time.sleep(2)  # Final stabilization
+    
     return app
 
 
