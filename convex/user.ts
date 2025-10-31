@@ -163,7 +163,7 @@ export const updateSyncStatus = mutation({
     if (!user) {
       throw new Error("User not found");
     }
-    
+
     // Handle errorReason - stack errors in array
     let updatedErrorReasons: string[] | undefined = undefined;
     if (args.errorReason) {
@@ -188,7 +188,7 @@ export const updateSyncStatus = mutation({
       }
       // else undefined, which means no errors
     }
-    
+
     await ctx.db.patch(args.userId, {
       syncStatus: args.syncStatus,
       errorReason: updatedErrorReasons,
@@ -212,6 +212,11 @@ export const retryUser = mutation({
     if (!user) {
       throw new Error("User not found");
     }
+
+    if (user.syncStatus === "processing") {
+      throw new Error("Cannot retry while processing");
+    }
+
     await ctx.db.patch(args.userId, {
       syncStatus: "pending",
       // Do NOT clear errorReason - preserve error history (stacked data)
