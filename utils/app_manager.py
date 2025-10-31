@@ -256,32 +256,78 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
 
 def find_and_close_error_dialog(app: Application, 
                                 error_keywords: List[str] = None,
-                                timeout: float = 2.0) -> bool:
+                                timeout: float = 3.0) -> bool:
     """
-    Find and close error dialog popups (like SQL errors).
+    Find and close error dialog popups (like SQL errors, MySQL errors).
+    Checks both window title and content text, and also checks for modal dialogs.
     
     Args:
         app: Application instance
-        error_keywords: List of keywords to match in dialog title (default: common error keywords)
+        error_keywords: List of keywords to match in dialog title/content (default: common error keywords)
         timeout: Maximum time to wait for dialog (in seconds)
         
     Returns:
         True if error dialog was found and closed, False otherwise
     """
     if error_keywords is None:
-        error_keywords = ["error", "sql", "exception", "failed", "warning"]
+        error_keywords = ["error", "sql", "mysql", "exception", "failed", "warning", "server", "gone away"]
     
     try:
-        # Get all top-level windows
+        # Wait a bit for dialog to appear (dialogs might take time to show)
+        time.sleep(0.5)
+        
+        # Method 1: Check using pywinauto windows
         windows = app.windows()
         
         for win in windows:
             try:
-                window_text = win.window_text().lower()
+                # Get window title
+                window_title = win.window_text().lower()
                 
-                # Check if window title contains error keywords
-                if any(keyword.lower() in window_text for keyword in error_keywords):
+                # Skip empty windows
+                if not window_title:
+                    continue
+                
+                # Try to get window content/body text (for message boxes)
+                window_content = ""
+                try:
+                    # Try to get text from static text controls or labels
+                    static_texts = win.descendants(control_type="Static")
+                    content_parts = []
+                    for static in static_texts:
+                        try:
+                            text = static.window_text()
+                            if text and len(text.strip()) > 0:
+                                content_parts.append(text.lower())
+                        except Exception:
+                            pass
+                    window_content = " ".join(content_parts)
+                except Exception:
+                    pass
+                
+                # Also try to get text from all child controls
+                try:
+                    all_texts = []
+                    for child in win.descendants():
+                        try:
+                            child_text = child.window_text()
+                            if child_text and len(child_text.strip()) > 0:
+                                all_texts.append(child_text.lower())
+                        except Exception:
+                            pass
+                    if all_texts:
+                        window_content = " ".join(all_texts)
+                except Exception:
+                    pass
+                
+                # Combine title and content for matching
+                full_text = (window_title + " " + window_content).lower()
+                
+                # Check if window title OR content contains error keywords
+                if any(keyword.lower() in full_text for keyword in error_keywords):
                     print(f"    [*] Found error dialog: '{win.window_text()}'")
+                    if window_content:
+                        print(f"    [*] Dialog content: '{window_content[:150]}...'")
                     
                     # Try to find and click OK/Yes/Close button
                     # Common button texts
@@ -289,7 +335,8 @@ def find_and_close_error_dialog(app: Application,
                     
                     for btn_text in button_texts:
                         try:
-                            # Try to find button with this text
+                            # Try multiple ways to find button
+                            # Method 1: By title
                             button = win.child_window(title_re=re.compile(btn_text, re.I))
                             if button.exists():
                                 print(f"    [*] Clicking '{btn_text}' button...")
@@ -297,7 +344,21 @@ def find_and_close_error_dialog(app: Application,
                                 time.sleep(0.5)
                                 return True
                         except Exception:
-                            continue
+                            try:
+                                # Method 2: By control type Button
+                                buttons = win.descendants(control_type="Button")
+                                for btn in buttons:
+                                    try:
+                                        btn_text_lower = btn.window_text().lower()
+                                        if btn_text in btn_text_lower:
+                                            print(f"    [*] Clicking '{btn_text}' button (found by control type)...")
+                                            btn.click()
+                                            time.sleep(0.5)
+                                            return True
+                                    except Exception:
+                                        continue
+                            except Exception:
+                                pass
                     
                     # If no button found, try pressing Enter or Escape
                     try:
@@ -327,8 +388,41 @@ def find_and_close_error_dialog(app: Application,
                         return True
                     except Exception:
                         pass
-            except Exception:
+            except Exception as e:
+                # Continue checking other windows
                 continue
+        
+        # Method 2: Try to find dialogs by checking for modal windows or dialog classes
+        # This catches dialogs that might not have been found above
+        try:
+            import pyautogui
+            # Check if there's a dialog-like window by looking for windows with specific classes
+            # This is a fallback method
+            dialog_classes = ["#32770", "Dialog", "MessageBox"]
+            for win in windows:
+                try:
+                    class_name = win.class_name()
+                    if class_name in dialog_classes:
+                        window_text = win.window_text().lower()
+                        if any(keyword in window_text for keyword in error_keywords):
+                            print(f"    [*] Found dialog by class: '{class_name}' - '{win.window_text()}'")
+                            # Try to close it
+                            try:
+                                win.type_keys("{ENTER}")
+                                time.sleep(0.5)
+                                return True
+                            except Exception:
+                                import pyautogui
+                                rect = win.rectangle()
+                                center_x = rect.left + (rect.width() // 2)
+                                bottom_y = rect.top + rect.height() - 30
+                                pyautogui.click(center_x, bottom_y)
+                                time.sleep(0.5)
+                                return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
         
         return False
     except Exception as e:

@@ -74,10 +74,19 @@ def create_user(client_id: str, first_name: str, last_name: str,
         # Click save button
         print(f"    [*] Save attempt {save_retry_count}/{max_save_retries}...")
         click(SAVE_BTN, delay=0.5)
-        wait(2)  # Wait a bit for either success or error dialog
+        wait(3)  # Wait longer for either success or error dialog to appear
         
-        # Check for error dialog popup
-        error_dialog_found = find_and_close_error_dialog(app, timeout=2.0)
+        # Check for error dialog popup (check multiple times as dialogs may appear slowly)
+        error_dialog_found = False
+        for check_attempt in range(3):
+            error_dialog_found = find_and_close_error_dialog(
+                app, 
+                error_keywords=["error", "sql", "mysql", "exception", "failed", "warning", "server", "gone away"],
+                timeout=2.0
+            )
+            if error_dialog_found:
+                break
+            wait(1)  # Wait before checking again
         
         if error_dialog_found:
             print(f"    [!] SQL error detected! Need to delete user and retry...")
