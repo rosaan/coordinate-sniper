@@ -45,6 +45,13 @@ def process_user(user: Dict[str, Any], client: ConvexClient, db: LocalDB) -> Non
     local_user = db.get_user(user_id)
     if not local_user:
         db.add_user(user_id, client_code, first_name, last_name)
+    else:
+        # Extra safeguard: Skip if already FAILED with MySQL error flag
+        if local_user["status"] == UserStatus.FAILED:
+            error_msg = local_user.get("error_message", "")
+            if "MYSQL_ERROR_DELETED" in error_msg or "MYSQL_ERROR_DELETED_FLAGGED" in error_msg:
+                print(f"[+] Skipping user {user_id} - already flagged as FAILED due to MySQL error (create->delete loop prevented)")
+                return
     
     # Mark as processing
     db.update_status(user_id, UserStatus.PROCESSING)
@@ -164,10 +171,14 @@ def process_user(user: Dict[str, Any], client: ConvexClient, db: LocalDB) -> Non
             db.update_status(user_id, UserStatus.FAILED, error_message=error_msg)
             print(f"    [*] User will NOT be retried - requires manual intervention")
             
-        elif "MYSQL_ERROR_DELETED" in error_msg:
-            # MySQL error - user already deleted from VAEEG and local DB
+        elif "MYSQL_ERROR_DELETED" in error_msg or "MYSQL_ERROR_DELETED_FLAGGED" in error_msg:
+            # MySQL error - user already deleted from VAEEG, mark as FAILED and STOP retrying
             sync_status = "mysql_error_deleted"
             print(f"    [*] Reporting MySQL error to backend: {sync_status}")
+            print(f"    [*] USER FLAGGED - Will NOT be retried (create->delete loop prevented)")
+            
+            # Mark as FAILED in local DB so it won't be retried
+            db.update_status(user_id, UserStatus.FAILED, error_message=error_msg)
             
             # Report to backend
             try:
@@ -180,8 +191,7 @@ def process_user(user: Dict[str, Any], client: ConvexClient, db: LocalDB) -> Non
             except Exception as backend_error:
                 print(f"    [!] Failed to report status to backend: {backend_error}")
             
-            # User already removed from local DB, so no need to update
-            print(f"    [*] User deleted and removed - will NOT be retried")
+            print(f"    [*] User deleted and FLAGGED as FAILED - will NOT be retried")
             
         elif "DELETE_FAILED" in error_msg or "CLIENT_ID_MISMATCH" in error_msg:
             sync_status = "client_id_mismatch" if "CLIENT_ID_MISMATCH" in error_msg else "delete_failed"
@@ -293,6 +303,15 @@ def sync_loop(client: ConvexClient, db: LocalDB) -> None:
                 # Skip if already completed in local DB
                 if db.is_user_processed(user_id):
                     continue
+                
+                # Skip if user is FAILED with MySQL error flag (prevent create->delete loop)
+                local_user = db.get_user(user_id)
+                if local_user:
+                    if local_user["status"] == UserStatus.FAILED:
+                        error_msg = local_user.get("error_message", "")
+                        if "MYSQL_ERROR_DELETED" in error_msg or "MYSQL_ERROR_DELETED_FLAGGED" in error_msg:
+                            print(f"[+] Skipping user {user_id} - flagged as FAILED due to MySQL error (create->delete loop prevented)")
+                            continue
                 
                 # Process the user
                 process_user(user, client, db)

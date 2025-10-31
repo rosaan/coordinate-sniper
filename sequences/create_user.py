@@ -103,12 +103,12 @@ def create_user(client_id: str, first_name: str, last_name: str,
                         raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: Could not delete user from VAEEG")
                     
                     print(f"    [✓] User deleted from VAEEG successfully")
-                    print(f"    [*] MySQL error occurred - user deleted and will be removed from local DB")
-                    print(f"    [*] No retry - reporting to backend")
+                    print(f"    [*] MySQL error occurred - user deleted and flagged")
+                    print(f"    [*] STOPPING - User will be marked as FAILED and NOT retried")
                     
-                    # Raise exception to signal sync_engine to delete from local DB and report
-                    error_reason = f"MySQL error occurred. User deleted from VAEEG. Client ID: {client_id}"
-                    raise RuntimeError(f"MYSQL_ERROR_DELETED: {error_reason}")
+                    # Raise exception to signal sync_engine to mark as FAILED and stop retrying
+                    error_reason = f"MySQL error occurred. User deleted from VAEEG. Client ID: {client_id}. User flagged - do not retry."
+                    raise RuntimeError(f"MYSQL_ERROR_DELETED_FLAGGED: {error_reason}")
                     
                 except RuntimeError as e:
                     # Re-raise if it's already our error
@@ -178,57 +178,56 @@ def create_user(client_id: str, first_name: str, last_name: str,
         last_name_lower = last_name.lower().strip() if last_name else ""
         print(f"    [*] Will verify clipboard contains: '{first_name}' or '{last_name}'")
         
-        # Improved clipboard copy with multiple methods
+        # Improved clipboard copy with reliable change detection
         url = None
-        max_retries = 20  # Increased retries for reliability
+        max_retries = 10  # Reduced retries but with better reliability
         retry_count = 0
         
         while retry_count < max_retries and url is None:
             retry_count += 1
             print(f"    [*] Copy attempt {retry_count}/{max_retries}...")
             
-            # Method 1: Click copy button
             try:
+                # Method 1: Click copy button and wait for clipboard change
                 print("    [*] Clicking copy button in 'Patient link code' window...")
-                click(RECORDING_LINK_COPY, delay=0.3)
+                click(RECORDING_LINK_COPY, delay=0.5)
                 
-                # Wait longer for clipboard to update (slower systems need more time)
-                wait(1.0)
-                
-                # Read clipboard multiple times to ensure we get the latest content
-                new_clipboard = None
-                for read_attempt in range(3):
-                    try:
-                        clipboard_candidate = get_clipboard(max_attempts=3)
-                        if clipboard_candidate and clipboard_candidate != clipboard_before:
-                            new_clipboard = clipboard_candidate
-                            break
-                    except Exception:
-                        pass
-                    wait(0.3)
-                
-                if not new_clipboard or new_clipboard == clipboard_before:
-                    print(f"    [!] Clipboard didn't change, trying alternative method...")
+                # Wait for clipboard to actually change (more reliable than fixed wait)
+                try:
+                    print("    [*] Waiting for clipboard to change...")
+                    new_clipboard = wait_for_clipboard_change(
+                        initial_content=clipboard_before,
+                        timeout=5.0,
+                        check_interval=0.2
+                    )
+                    print(f"    [✓] Clipboard changed detected!")
+                except TimeoutError:
+                    print(f"    [!] Clipboard didn't change after clicking copy button, trying alternative...")
                     # Method 2: Try Ctrl+C as alternative
                     try:
                         import pyautogui
-                        # Select all and copy (in case copy button didn't work)
+                        # Focus the window first
+                        link_window.set_focus()
+                        wait(0.3)
+                        # Select all and copy
                         pyautogui.hotkey("ctrl", "a")
                         wait(0.2)
                         pyautogui.hotkey("ctrl", "c")
-                        wait(1.0)
-                        new_clipboard = get_clipboard(max_attempts=3)
-                    except Exception:
-                        pass
-                
-                if not new_clipboard or new_clipboard == clipboard_before:
-                    print(f"    [!] Clipboard still didn't change")
-                    if retry_count < max_retries:
-                        wait(1.0)
-                        continue
-                    else:
-                        # Final attempt failed
-                        raise RuntimeError(f"CLIPBOARD_COPY_FAILED: Could not copy link after {max_retries} attempts. Clipboard unchanged.")
+                        wait(0.5)
+                        # Wait for clipboard change
+                        new_clipboard = wait_for_clipboard_change(
+                            initial_content=clipboard_before,
+                            timeout=3.0,
+                            check_interval=0.2
+                        )
+                        print(f"    [✓] Clipboard changed via Ctrl+C!")
+                    except TimeoutError:
+                        if retry_count < max_retries:
+                            print(f"    [!] Clipboard still didn't change, retrying...")
+                            wait(1.0)
+                            continue
+                        else:
+                            raise RuntimeError(f"CLIPBOARD_COPY_FAILED: Could not copy link after {max_retries} attempts. Clipboard unchanged.")
                 
                 # Verify clipboard contains user's first or last name
                 clipboard_lower = new_clipboard.lower()
@@ -236,7 +235,7 @@ def create_user(client_id: str, first_name: str, last_name: str,
                 contains_last_name = last_name_lower in clipboard_lower if last_name_lower else False
                 
                 if contains_first_name or contains_last_name:
-                    url = new_clipboard
+                    url = new_clipboard.strip()
                     print(f"    [✓] Clipboard verified - contains user data!")
                     if contains_first_name:
                         print(f"    [✓] Found first name '{first_name}' in clipboard")
@@ -247,7 +246,7 @@ def create_user(client_id: str, first_name: str, last_name: str,
                 else:
                     print(f"    [!] Clipboard changed but doesn't contain user data")
                     print(f"    [*] Looking for: '{first_name}' or '{last_name}'")
-                    print(f"    [*] Clipboard content: {new_clipboard[:100]}..." if len(new_clipboard) > 100 else f"    [*] Clipboard content: {new_clipboard}")
+                    print(f"    [*] Clipboard content: {new_clipboard[:150]}..." if len(new_clipboard) > 150 else f"    [*] Clipboard content: {new_clipboard}")
                     
                     if retry_count < max_retries:
                         # Update baseline and try again
@@ -279,7 +278,7 @@ def create_user(client_id: str, first_name: str, last_name: str,
         
         # Final verification - if we still don't have a URL, it's a failure
         if url is None:
-            final_clipboard = get_clipboard(max_attempts=3)
+            final_clipboard = get_clipboard()
             if final_clipboard == clipboard_before:
                 raise RuntimeError(f"CLIPBOARD_COPY_FAILED: Clipboard content didn't change at all after {max_retries} attempts. Expected to find '{first_name}' or '{last_name}'")
             else:
@@ -287,7 +286,7 @@ def create_user(client_id: str, first_name: str, last_name: str,
                 final_lower = final_clipboard.lower()
                 if (first_name_lower in final_lower if first_name_lower else False) or \
                    (last_name_lower in final_lower if last_name_lower else False):
-                    url = final_clipboard
+                    url = final_clipboard.strip()
                     print(f"    [✓] Final check successful - found user data in clipboard")
                 else:
                     raise RuntimeError(f"CLIPBOARD_COPY_FAILED: Could not verify clipboard contains user data. Got: '{final_clipboard[:100]}...'")
