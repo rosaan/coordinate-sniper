@@ -34,7 +34,7 @@ from .ui_control import (
     retrieve_file,
     install_pytesseract,
 )
-from .app_manager import connect_or_start, bring_up_window, get_window_state, find_and_close_error_dialog
+from .app_manager import connect_or_start, bring_up_window, get_window_state, find_and_close_error_dialog, close_application
 
 __all__ = [
     # UI Control
@@ -77,5 +77,6 @@ __all__ = [
     'bring_up_window',
     'get_window_state',
     'find_and_close_error_dialog',
+    'close_application',
 ]
 

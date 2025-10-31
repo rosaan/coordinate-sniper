@@ -45,217 +45,225 @@ def create_user(client_id: str, first_name: str, last_name: str,
     # Give the app extra time to stabilize after startup (critical for slow laptops)
     wait(3)
     
-    # Execute the create user sequence with extended delays
-    print("    [*] Clicking create user button...")
-    click(CREATE_USER_BTN, delay=0.5)
-    wait(2)  # Wait for form to load
-    
-    print("    [*] Filling client ID...")
-    click_and_type(CLIENT_ID, client_id, type_interval=0.05, delay=1.5)
-    wait(1)  # Extra wait between fields
-    
-    print("    [*] Filling first name...")
-    click_and_type(FIRST_NAME, first_name, type_interval=0.05, delay=1.5)
-    wait(1)  # Extra wait between fields
-    
-    print("    [*] Filling last name...")
-    click_and_type(LAST_NAME, last_name, type_interval=0.05, delay=1.5)
-    wait(1)  # Extra wait before save
-    
-    # Save with retry logic to handle SQL error popups
-    print("    [*] Saving user (with error handling)...")
-    max_save_retries = 10
-    save_retry_count = 0
-    link_dialog_ready = False
-    
-    while save_retry_count < max_save_retries and not link_dialog_ready:
-        save_retry_count += 1
+    # Ensure VAEEG is closed at the end, even if there's an error
+    try:
+        # Execute the create user sequence with extended delays
+            print("    [*] Clicking create user button...")
+        click(CREATE_USER_BTN, delay=0.5)
+        wait(2)  # Wait for form to load
         
-        # Click save button
-        print(f"    [*] Save attempt {save_retry_count}/{max_save_retries}...")
-        click(SAVE_BTN, delay=0.5)
-        wait(3)  # Wait longer for either success or error dialog to appear
+        print("    [*] Filling client ID...")
+        click_and_type(CLIENT_ID, client_id, type_interval=0.05, delay=1.5)
+        wait(1)  # Extra wait between fields
         
-        # Check for error dialog popup (check multiple times as dialogs may appear slowly)
-        error_dialog_found = False
-        for check_attempt in range(3):
-            error_dialog_found = find_and_close_error_dialog(
-                app, 
-                error_keywords=["error", "sql", "mysql", "exception", "failed", "warning", "server", "gone away"],
-                timeout=2.0
-            )
-            if error_dialog_found:
-                break
-            wait(1)  # Wait before checking again
+        print("    [*] Filling first name...")
+        click_and_type(FIRST_NAME, first_name, type_interval=0.05, delay=1.5)
+        wait(1)  # Extra wait between fields
         
-        if error_dialog_found:
-            print(f"    [!] MySQL/SQL error detected!")
-            print(f"    [*] Deleting user with client ID: {client_id} from VAEEG...")
+        print("    [*] Filling last name...")
+        click_and_type(LAST_NAME, last_name, type_interval=0.05, delay=1.5)
+        wait(1)  # Extra wait before save
+        
+        # Save with retry logic to handle SQL error popups
+        print("    [*] Saving user (with error handling)...")
+        max_save_retries = 10
+        save_retry_count = 0
+        link_dialog_ready = False
+        
+        while save_retry_count < max_save_retries and not link_dialog_ready:
+            save_retry_count += 1
             
+            # Click save button
+            print(f"    [*] Save attempt {save_retry_count}/{max_save_retries}...")
+            click(SAVE_BTN, delay=0.5)
+            wait(3)  # Wait longer for either success or error dialog to appear
+            
+            # Check for error dialog popup (check multiple times as dialogs may appear slowly)
+            error_dialog_found = False
+            for check_attempt in range(3):
+                error_dialog_found = find_and_close_error_dialog(
+                    app, 
+                    error_keywords=["error", "sql", "mysql", "exception", "failed", "warning", "server", "gone away"],
+                    timeout=2.0
+                )
+                if error_dialog_found:
+                    break
+                wait(1)  # Wait before checking again
+            
+            if error_dialog_found:
+                print(f"    [!] MySQL/SQL error detected!")
+                print(f"    [*] Deleting user with client ID: {client_id} from VAEEG...")
+                
+                try:
+                    # Delete the user that caused the error
+                    delete_success = delete_user(client_id, exe_path, window_title_regex)
+                    
+                    if not delete_success:
+                        print(f"    [✗] Delete operation failed!")
+                        raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: Could not delete user from VAEEG")
+                    
+                    print(f"    [✓] User deleted from VAEEG successfully")
+                    print(f"    [*] MySQL error occurred - user deleted and will be removed from local DB")
+                    print(f"    [*] No retry - reporting to backend")
+                    
+                    # Raise exception to signal sync_engine to delete from local DB and report
+                    error_reason = f"MySQL error occurred. User deleted from VAEEG. Client ID: {client_id}"
+                    raise RuntimeError(f"MYSQL_ERROR_DELETED: {error_reason}")
+                    
+                except RuntimeError as e:
+                    # Re-raise if it's already our error
+                    if "MYSQL_ERROR" in str(e):
+                        raise
+                    # Otherwise wrap it
+                    raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: {str(e)}")
+                except Exception as e:
+                    print(f"    [✗] Error during delete: {e}")
+                    raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: {str(e)}")
+            
+            # Check if "Patient link code" window appeared (success!)
+            print("    [*] Waiting for 'Patient link code' window to appear...")
+            link_window = None
             try:
-                # Delete the user that caused the error
-                delete_success = delete_user(client_id, exe_path, window_title_regex)
-                
-                if not delete_success:
-                    print(f"    [✗] Delete operation failed!")
-                    raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: Could not delete user from VAEEG")
-                
-                print(f"    [✓] User deleted from VAEEG successfully")
-                print(f"    [*] MySQL error occurred - user deleted and will be removed from local DB")
-                print(f"    [*] No retry - reporting to backend")
-                
-                # Raise exception to signal sync_engine to delete from local DB and report
-                error_reason = f"MySQL error occurred. User deleted from VAEEG. Client ID: {client_id}"
-                raise RuntimeError(f"MYSQL_ERROR_DELETED: {error_reason}")
-                
-            except RuntimeError as e:
-                # Re-raise if it's already our error
-                if "MYSQL_ERROR" in str(e):
-                    raise
-                # Otherwise wrap it
-                raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: {str(e)}")
-            except Exception as e:
-                print(f"    [✗] Error during delete: {e}")
-                raise RuntimeError(f"MYSQL_ERROR_DELETE_FAILED: {str(e)}")
-        
-        # Check if "Patient link code" window appeared (success!)
-        print("    [*] Waiting for 'Patient link code' window to appear...")
-        link_window = None
-        try:
-            # Wait for the window to appear
-            link_window = app.window(title_re="Patient link code")
-            link_window.wait("exists", timeout=10.0)
-            print("    [✓] 'Patient link code' window appeared - save successful!")
-            break
-        except Exception:
-            # Window not found yet, wait and check again
-            wait(2)
-            try:
+                # Wait for the window to appear
                 link_window = app.window(title_re="Patient link code")
-                link_window.wait("exists", timeout=5.0)
-                print("    [✓] 'Patient link code' window appeared after extended wait - save successful!")
+                link_window.wait("exists", timeout=10.0)
+                print("    [✓] 'Patient link code' window appeared - save successful!")
+                link_dialog_ready = True
                 break
             except Exception:
-                pass
-    
-    # Final check - wait longer if window still not ready
-    if link_window is None:
-        print("    [*] Waiting for 'Patient link code' window (extended wait)...")
+                # Window not found yet, wait and check again
+                wait(2)
+                try:
+                    link_window = app.window(title_re="Patient link code")
+                    link_window.wait("exists", timeout=5.0)
+                    print("    [✓] 'Patient link code' window appeared after extended wait - save successful!")
+                    link_dialog_ready = True
+                    break
+                except Exception:
+                    pass
+        
+        # Final check - wait longer if window still not ready
+        if link_window is None:
+            print("    [*] Waiting for 'Patient link code' window (extended wait)...")
+            try:
+                link_window = app.window(title_re="Patient link code")
+                link_window.wait("exists", timeout=15.0)
+                print("    [✓] 'Patient link code' window found")
+            except Exception as e:
+                print(f"    [!] 'Patient link code' window not found: {e}")
+                raise RuntimeError("Failed to find 'Patient link code' window after save")
+        
+        # Focus the "Patient link code" window
+        print("    [*] Focusing 'Patient link code' window...")
         try:
-            link_window = app.window(title_re="Patient link code")
-            link_window.wait("exists", timeout=15.0)
-            print("    [✓] 'Patient link code' window found")
+            link_window.set_focus()
+            link_window.wait("visible enabled", timeout=5.0)
+            wait(1)  # Give window time to fully focus
+            print("    [✓] Window focused")
         except Exception as e:
-            print(f"    [!] 'Patient link code' window not found: {e}")
-            raise RuntimeError("Failed to find 'Patient link code' window after save")
-    
-    # Focus the "Patient link code" window
-    print("    [*] Focusing 'Patient link code' window...")
-    try:
-        link_window.set_focus()
-        link_window.wait("visible enabled", timeout=5.0)
-        wait(1)  # Give window time to fully focus
-        print("    [✓] Window focused")
-    except Exception as e:
-        print(f"    [!] Warning: Could not focus window: {e}")
-        # Try to bring it up using bring_up_window method
-        try:
-            bring_up_window(app, "Patient link code", timeout=5.0, maximize=False)
-            wait(1)
-        except Exception:
-            pass
-    
-    # Get current clipboard content before copying (to detect change)
-    clipboard_before = get_clipboard()
-    print(f"    [*] Current clipboard (before copy): {clipboard_before[:50]}..." if len(clipboard_before) > 50 else f"    [*] Current clipboard (before copy): {clipboard_before}")
-    
-    # Prepare verification strings (normalized for comparison)
-    first_name_lower = first_name.lower().strip()
-    last_name_lower = last_name.lower().strip() if last_name else ""
-    print(f"    [*] Will verify clipboard contains: '{first_name}' or '{last_name}'")
-    
-    # Click copy button in the "Patient link code" window
-    print("    [*] Clicking copy button in 'Patient link code' window...")
-    click(RECORDING_LINK_COPY, delay=0.5)
-    wait(0.5)  # Give copy operation time to complete
-    
-    # Wait for clipboard to change AND verify it contains user data
-    print("    [*] Waiting for clipboard to update and verify content...")
-    url = None
-    max_retries = 15  # Increased retries for slow systems
-    retry_count = 0
-    
-    while retry_count < max_retries and url is None:
-        try:
-            # Wait for clipboard to change from previous state
-            new_clipboard = wait_for_clipboard_change(
-                initial_content=clipboard_before,
-                timeout=3.0,  # Per attempt timeout
-                check_interval=0.2
-            )
-            
-            # Verify clipboard contains user's first or last name
-            # This ensures we got the correct link for this user
-            clipboard_lower = new_clipboard.lower()
-            
-            contains_first_name = first_name_lower in clipboard_lower if first_name_lower else False
-            contains_last_name = last_name_lower in clipboard_lower if last_name_lower else False
-            
-            if contains_first_name or contains_last_name:
-                url = new_clipboard
-                print(f"    [✓] Clipboard verified - contains user data!")
-                if contains_first_name:
-                    print(f"    [✓] Found first name '{first_name}' in clipboard")
-                if contains_last_name:
-                    print(f"    [✓] Found last name '{last_name}' in clipboard")
-                print(f"    [✓] Link: {url[:100]}..." if len(url) > 100 else f"    [✓] Link: {url}")
-                break
-            else:
-                retry_count += 1
-                print(f"    [!] Attempt {retry_count}/{max_retries}: Clipboard changed but doesn't contain user data")
-                print(f"    [*] Looking for: '{first_name}' or '{last_name}'")
-                print(f"    [*] Clipboard content: {new_clipboard[:100]}..." if len(new_clipboard) > 100 else f"    [*] Clipboard content: {new_clipboard}")
+            print(f"    [!] Warning: Could not focus window: {e}")
+            # Try to bring it up using bring_up_window method
+            try:
+                bring_up_window(app, "Patient link code", timeout=5.0, maximize=False)
+                wait(1)
+            except Exception:
+                pass
+        
+        # Get current clipboard content before copying (to detect change)
+        clipboard_before = get_clipboard()
+        print(f"    [*] Current clipboard (before copy): {clipboard_before[:50]}..." if len(clipboard_before) > 50 else f"    [*] Current clipboard (before copy): {clipboard_before}")
+        
+        # Prepare verification strings (normalized for comparison)
+        first_name_lower = first_name.lower().strip()
+        last_name_lower = last_name.lower().strip() if last_name else ""
+        print(f"    [*] Will verify clipboard contains: '{first_name}' or '{last_name}'")
+        
+        # Click copy button in the "Patient link code" window
+        print("    [*] Clicking copy button in 'Patient link code' window...")
+        click(RECORDING_LINK_COPY, delay=0.5)
+        wait(0.5)  # Give copy operation time to complete
+        
+        # Wait for clipboard to change AND verify it contains user data
+        print("    [*] Waiting for clipboard to update and verify content...")
+        url = None
+        max_retries = 15  # Increased retries for slow systems
+        retry_count = 0
+        
+        while retry_count < max_retries and url is None:
+            try:
+                # Wait for clipboard to change from previous state
+                new_clipboard = wait_for_clipboard_change(
+                    initial_content=clipboard_before,
+                    timeout=3.0,  # Per attempt timeout
+                    check_interval=0.2
+                )
                 
+                # Verify clipboard contains user's first or last name
+                # This ensures we got the correct link for this user
+                clipboard_lower = new_clipboard.lower()
+                
+                contains_first_name = first_name_lower in clipboard_lower if first_name_lower else False
+                contains_last_name = last_name_lower in clipboard_lower if last_name_lower else False
+                
+                if contains_first_name or contains_last_name:
+                    url = new_clipboard
+                    print(f"    [✓] Clipboard verified - contains user data!")
+                    if contains_first_name:
+                        print(f"    [✓] Found first name '{first_name}' in clipboard")
+                    if contains_last_name:
+                        print(f"    [✓] Found last name '{last_name}' in clipboard")
+                    print(f"    [✓] Link: {url[:100]}..." if len(url) > 100 else f"    [✓] Link: {url}")
+                    break
+                else:
+                    retry_count += 1
+                    print(f"    [!] Attempt {retry_count}/{max_retries}: Clipboard changed but doesn't contain user data")
+                    print(f"    [*] Looking for: '{first_name}' or '{last_name}'")
+                    print(f"    [*] Clipboard content: {new_clipboard[:100]}..." if len(new_clipboard) > 100 else f"    [*] Clipboard content: {new_clipboard}")
+                    
+                    if retry_count < max_retries:
+                        # Update baseline to the new (wrong) content and try again
+                        clipboard_before = new_clipboard
+                        wait(1.0)  # Wait before retrying
+                        # Click copy again
+                        print("    [*] Re-clicking copy button...")
+                        click(RECORDING_LINK_COPY, delay=0.5)
+                        wait(0.5)  # Give copy operation time
+            except TimeoutError:
+                retry_count += 1
+                print(f"    [!] Attempt {retry_count}/{max_retries}: Clipboard didn't change")
                 if retry_count < max_retries:
-                    # Update baseline to the new (wrong) content and try again
-                    clipboard_before = new_clipboard
-                    wait(1.0)  # Wait before retrying
-                    # Click copy again
+                    wait(1.0)
                     print("    [*] Re-clicking copy button...")
                     click(RECORDING_LINK_COPY, delay=0.5)
                     wait(0.5)  # Give copy operation time
-        except TimeoutError:
-            retry_count += 1
-            print(f"    [!] Attempt {retry_count}/{max_retries}: Clipboard didn't change")
-            if retry_count < max_retries:
-                wait(1.0)
-                print("    [*] Re-clicking copy button...")
-                click(RECORDING_LINK_COPY, delay=0.5)
-                wait(0.5)  # Give copy operation time
-    
-    # Final fallback: try to get clipboard one more time
-    if url is None:
-        print("    [✗] ERROR: Could not verify clipboard contains user data after all retries!")
-        print("    [*] Getting clipboard content as fallback...")
-        final_clipboard = get_clipboard()
         
-        if final_clipboard == clipboard_before:
-            print("    [✗] CRITICAL ERROR: Clipboard content didn't change at all!")
-            raise RuntimeError(f"Failed to copy link - clipboard unchanged. Expected to find '{first_name}' or '{last_name}'")
-        else:
-            # Last attempt: check if it contains user data
-            final_lower = final_clipboard.lower()
-            if (first_name_lower in final_lower if first_name_lower else False) or \
-               (last_name_lower in final_lower if last_name_lower else False):
-                url = final_clipboard
-                print(f"    [✓] Fallback successful - found user data in clipboard")
+        # Final fallback: try to get clipboard one more time
+        if url is None:
+            print("    [✗] ERROR: Could not verify clipboard contains user data after all retries!")
+            print("    [*] Getting clipboard content as fallback...")
+            final_clipboard = get_clipboard()
+            
+            if final_clipboard == clipboard_before:
+                print("    [✗] CRITICAL ERROR: Clipboard content didn't change at all!")
+                raise RuntimeError(f"Failed to copy link - clipboard unchanged. Expected to find '{first_name}' or '{last_name}'")
             else:
-                print(f"    [✗] WARNING: Got unverified link that doesn't contain user data")
-                print(f"    [*] Unverified link: {final_clipboard[:100]}..." if len(final_clipboard) > 100 else f"    [*] Unverified link: {final_clipboard}")
-                url = final_clipboard  # Still return it, but warn
-    
-    print("    [*] Closing link dialog...")
-    click(CLOSE_LINK_CODE, delay=0.5)
-    wait(1)  # Wait for dialog to close
-    
-    return url
+                # Last attempt: check if it contains user data
+                final_lower = final_clipboard.lower()
+                if (first_name_lower in final_lower if first_name_lower else False) or \
+                   (last_name_lower in final_lower if last_name_lower else False):
+                    url = final_clipboard
+                    print(f"    [✓] Fallback successful - found user data in clipboard")
+                else:
+                    print(f"    [✗] WARNING: Got unverified link that doesn't contain user data")
+                    print(f"    [*] Unverified link: {final_clipboard[:100]}..." if len(final_clipboard) > 100 else f"    [*] Unverified link: {final_clipboard}")
+                    url = final_clipboard  # Still return it, but warn
+        
+        print("    [*] Closing link dialog...")
+        click(CLOSE_LINK_CODE, delay=0.5)
+        wait(1)  # Wait for dialog to close
+        
+        return url
+    finally:
+        # Always close VAEEG application after sequence completes (even on error)
+        from utils.app_manager import close_application
+        close_application(app, exe_path)

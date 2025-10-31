@@ -163,6 +163,10 @@ def delete_user(client_id: str,
     clear_input_box(search_client_input, backspace_count=100)
     wait(0.5)
     
+    # Close VAEEG application after sequence completes
+    from utils.app_manager import close_application
+    close_application(app, exe_path)
+    
     print("    [✓] User deletion completed")
     return True
 

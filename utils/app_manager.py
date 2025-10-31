@@ -429,3 +429,47 @@ def find_and_close_error_dialog(app: Application,
         # If any error occurs, assume no dialog found
         return False
 
+
+def close_application(app: Application, exe_path: str = None) -> None:
+    """
+    Close the VAEEG application.
+    
+    Args:
+        app: Application instance
+        exe_path: Optional path to executable (for fallback kill)
+    """
+    try:
+        print("    [*] Closing VAEEG application...")
+        
+        # Try to close all windows gracefully
+        try:
+            windows = app.windows()
+            for win in windows:
+                try:
+                    win.close()
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        # Try to kill the process
+        try:
+            app.kill()
+            print("    [✓] VAEEG application closed")
+            time.sleep(1)  # Give it time to fully close
+        except Exception:
+            # Fallback: use taskkill if available
+            if exe_path:
+                import subprocess
+                exe_name = os.path.basename(exe_path)
+                try:
+                    subprocess.run(["taskkill", "/F", "/IM", exe_name], 
+                                 capture_output=True, timeout=5)
+                    print("    [✓] VAEEG application closed (via taskkill)")
+                    time.sleep(1)
+                except Exception:
+                    print("    [!] Could not close VAEEG application")
+    except Exception as e:
+        print(f"    [!] Error closing VAEEG: {e}")
+
