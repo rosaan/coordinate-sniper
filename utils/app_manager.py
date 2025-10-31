@@ -3,9 +3,10 @@ Application management utilities for connecting to and managing application wind
 """
 import os
 import time
+import re
 from pywinauto import Application
 from pywinauto.findwindows import ElementNotFoundError
-from typing import Optional
+from typing import Optional, List
 
 
 def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float = 5.0) -> Application:
@@ -251,4 +252,86 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
     
     print(f"[✓] Window is ready (state: {get_window_state(win)})")
     return win
+
+
+def find_and_close_error_dialog(app: Application, 
+                                error_keywords: List[str] = None,
+                                timeout: float = 2.0) -> bool:
+    """
+    Find and close error dialog popups (like SQL errors).
+    
+    Args:
+        app: Application instance
+        error_keywords: List of keywords to match in dialog title (default: common error keywords)
+        timeout: Maximum time to wait for dialog (in seconds)
+        
+    Returns:
+        True if error dialog was found and closed, False otherwise
+    """
+    if error_keywords is None:
+        error_keywords = ["error", "sql", "exception", "failed", "warning"]
+    
+    try:
+        # Get all top-level windows
+        windows = app.windows()
+        
+        for win in windows:
+            try:
+                window_text = win.window_text().lower()
+                
+                # Check if window title contains error keywords
+                if any(keyword.lower() in window_text for keyword in error_keywords):
+                    print(f"    [*] Found error dialog: '{win.window_text()}'")
+                    
+                    # Try to find and click OK/Yes/Close button
+                    # Common button texts
+                    button_texts = ["ok", "yes", "close", "accept", "okay"]
+                    
+                    for btn_text in button_texts:
+                        try:
+                            # Try to find button with this text
+                            button = win.child_window(title_re=re.compile(btn_text, re.I))
+                            if button.exists():
+                                print(f"    [*] Clicking '{btn_text}' button...")
+                                button.click()
+                                time.sleep(0.5)
+                                return True
+                        except Exception:
+                            continue
+                    
+                    # If no button found, try pressing Enter or Escape
+                    try:
+                        print("    [*] Pressing Enter to close dialog...")
+                        win.type_keys("{ENTER}")
+                        time.sleep(0.5)
+                        return True
+                    except Exception:
+                        try:
+                            print("    [*] Pressing Escape to close dialog...")
+                            win.type_keys("{ESC}")
+                            time.sleep(0.5)
+                            return True
+                        except Exception:
+                            pass
+                    
+                    # Last resort: try clicking at common OK button locations
+                    try:
+                        rect = win.rectangle()
+                        # Click near bottom-center (common OK button location)
+                        center_x = rect.left + (rect.width() // 2)
+                        bottom_y = rect.top + rect.height() - 30
+                        import pyautogui
+                        pyautogui.click(center_x, bottom_y)
+                        time.sleep(0.5)
+                        print("    [*] Clicked dialog center-bottom (OK button area)")
+                        return True
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+        
+        return False
+    except Exception as e:
+        # If any error occurs, assume no dialog found
+        return False
 

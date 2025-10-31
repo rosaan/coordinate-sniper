@@ -2,7 +2,8 @@
 Sequence for creating a new user in the VAEEG application.
 """
 from utils import click, click_and_type, wait, get_clipboard, wait_for_element_ready, wait_for_clipboard_change
-from utils.app_manager import connect_or_start, bring_up_window
+from utils.app_manager import connect_or_start, bring_up_window, find_and_close_error_dialog
+from sequences.delete_user import delete_user
 
 # Coordinate definitions for the create user flow
 CREATE_USER_BTN = (442.5, 205.0)
@@ -61,21 +62,100 @@ def create_user(client_id: str, first_name: str, last_name: str,
     click_and_type(LAST_NAME, last_name, type_interval=0.05, delay=1.5)
     wait(1)  # Extra wait before save
     
-    print("    [*] Saving user...")
-    click(SAVE_BTN, delay=0.5)
+    # Save with retry logic to handle SQL error popups
+    print("    [*] Saving user (with error handling)...")
+    max_save_retries = 10
+    save_retry_count = 0
+    link_dialog_ready = False
     
-    # Wait for the link dialog to appear and be ready (check copy button location)
-    print("    [*] Waiting for link dialog to appear...")
-    dialog_ready = wait_for_element_ready(
-        RECORDING_LINK_COPY, 
-        timeout=15.0,  # Extended timeout for slow laptops
-        check_interval=0.5,
-        stable_duration=1.0  # Dialog must be stable for 1 second
-    )
+    while save_retry_count < max_save_retries and not link_dialog_ready:
+        save_retry_count += 1
+        
+        # Click save button
+        print(f"    [*] Save attempt {save_retry_count}/{max_save_retries}...")
+        click(SAVE_BTN, delay=0.5)
+        wait(2)  # Wait a bit for either success or error dialog
+        
+        # Check for error dialog popup
+        error_dialog_found = find_and_close_error_dialog(app, timeout=2.0)
+        
+        if error_dialog_found:
+            print(f"    [!] SQL error detected! Need to delete user and retry...")
+            print(f"    [*] Deleting user with client ID: {client_id}")
+            
+            try:
+                # Delete the user that caused the error
+                delete_user(client_id, exe_path, window_title_regex)
+                wait(2)  # Wait after deletion
+                
+                # Re-open the create user form
+                print("    [*] Re-opening create user form...")
+                click(CREATE_USER_BTN, delay=0.5)
+                wait(2)  # Wait for form to load
+                
+                # Re-fill the form
+                print("    [*] Re-filling form fields...")
+                click_and_type(CLIENT_ID, client_id, type_interval=0.05, delay=1.5)
+                wait(1)
+                click_and_type(FIRST_NAME, first_name, type_interval=0.05, delay=1.5)
+                wait(1)
+                click_and_type(LAST_NAME, last_name, type_interval=0.05, delay=1.5)
+                wait(1)
+                
+                print("    [*] Retrying save after deletion...")
+                # Continue to next iteration to try save again
+                continue
+            except Exception as e:
+                print(f"    [✗] Error during delete/retry: {e}")
+                print("    [*] Will retry save anyway...")
+                wait(1)
+                continue
+        
+        # Check if link dialog appeared (success!)
+        print("    [*] Checking if link dialog appeared...")
+        link_dialog_ready = wait_for_element_ready(
+            RECORDING_LINK_COPY, 
+            timeout=3.0,  # Quick check
+            check_interval=0.3,
+            stable_duration=0.5
+        )
+        
+        if link_dialog_ready:
+            print("    [✓] Link dialog appeared - save successful!")
+            break
+        else:
+            # Wait a bit more and check again (in case it's slow)
+            wait(2)
+            link_dialog_ready = wait_for_element_ready(
+                RECORDING_LINK_COPY, 
+                timeout=2.0,
+                check_interval=0.3,
+                stable_duration=0.5
+            )
+            if link_dialog_ready:
+                print("    [✓] Link dialog appeared after extended wait - save successful!")
+                break
     
-    if not dialog_ready:
-        print("    [!] Dialog may not be ready, waiting additional time...")
-        wait(3)  # Fallback wait
+    # Final check - wait longer if dialog still not ready
+    if not link_dialog_ready:
+        print("    [*] Waiting for link dialog to appear (extended wait)...")
+        link_dialog_ready = wait_for_element_ready(
+            RECORDING_LINK_COPY, 
+            timeout=10.0,  # Extended timeout for slow laptops
+            check_interval=0.5,
+            stable_duration=1.0  # Dialog must be stable for 1 second
+        )
+        
+        if not link_dialog_ready:
+            print("    [!] Link dialog may not be ready, waiting additional time...")
+            wait(3)  # Fallback wait
+            # Check one more time
+            link_dialog_ready = wait_for_element_ready(
+                RECORDING_LINK_COPY, 
+                timeout=5.0,
+                check_interval=0.5,
+                stable_duration=0.5
+            )
     
     # Get current clipboard content before copying (to detect change)
     clipboard_before = get_clipboard()
