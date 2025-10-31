@@ -82,7 +82,7 @@ export const listPendingUsers = query({
       recordingInstruction: v.optional(v.array(v.string())),
       isCreatedLocally: v.optional(v.boolean()),
       syncStatus: v.optional(v.string()),
-      errorReason: v.optional(v.string()),
+      errorReason: v.optional(v.array(v.string())), // Array of error messages (stacks errors)
     })
   ),
   handler: async (ctx) => {
@@ -149,12 +149,13 @@ export const updateRecordingLink = mutation({
 
 /**
  * Update user sync status and error reason.
+ * Appends to errorReason array instead of replacing (stacks errors for history).
  */
 export const updateSyncStatus = mutation({
   args: {
     userId: v.id("users"),
     syncStatus: v.string(),
-    errorReason: v.optional(v.string()),
+    errorReason: v.optional(v.string()), // Single error message to append
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -162,18 +163,44 @@ export const updateSyncStatus = mutation({
     if (!user) {
       throw new Error("User not found");
     }
+    
+    // Handle errorReason - stack errors in array
+    let updatedErrorReasons: string[] | undefined = undefined;
+    if (args.errorReason) {
+      // Get existing errorReason array or convert string to array, or initialize empty array
+      const existingErrors = user.errorReason;
+      if (Array.isArray(existingErrors)) {
+        // Append to existing array
+        updatedErrorReasons = [...existingErrors, args.errorReason];
+      } else if (typeof existingErrors === "string" && existingErrors) {
+        // Convert existing string to array and append
+        updatedErrorReasons = [existingErrors, args.errorReason];
+      } else {
+        // Initialize new array
+        updatedErrorReasons = [args.errorReason];
+      }
+    } else {
+      // If no new error provided, preserve existing (could be array or string)
+      if (Array.isArray(user.errorReason)) {
+        updatedErrorReasons = user.errorReason;
+      } else if (typeof user.errorReason === "string" && user.errorReason) {
+        updatedErrorReasons = [user.errorReason];
+      }
+      // else undefined, which means no errors
+    }
+    
     await ctx.db.patch(args.userId, {
       syncStatus: args.syncStatus,
-      errorReason: args.errorReason,
+      errorReason: updatedErrorReasons,
     });
     return null;
   },
 });
 
 /**
- * Reset a user for retry - clears sync status and error, marks as pending.
- * This allows users that failed or were skipped to be retried.
- * Preserves recordingInstruction array (doesn't clear it - data is stacked).
+ * Reset a user for retry - clears sync status and marks as pending.
+ * Preserves both recordingInstruction and errorReason arrays (doesn't clear them - data is stacked for history).
+ * This allows users that failed or were skipped to be retried while keeping error history.
  */
 export const retryUser = mutation({
   args: {
@@ -187,9 +214,9 @@ export const retryUser = mutation({
     }
     await ctx.db.patch(args.userId, {
       syncStatus: "pending",
-      errorReason: undefined,
-      isCreatedLocally: false,
+      // Do NOT clear errorReason - preserve error history (stacked data)
       // Do NOT clear recordingInstruction - preserve stacked data
+      isCreatedLocally: false,
     });
     return null;
   },
