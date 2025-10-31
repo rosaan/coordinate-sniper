@@ -21,7 +21,7 @@ except ImportError:
     OCR_AVAILABLE = False
 
 
-def click(coords: Tuple[float, float], delay: float = 0.1) -> None:
+def click(coords: Tuple[float, float], delay: float = 0.05) -> None:
     """
     Click at the specified coordinates.
     
@@ -35,7 +35,7 @@ def click(coords: Tuple[float, float], delay: float = 0.1) -> None:
         time.sleep(delay)
 
 
-def double_click(coords: Tuple[float, float], delay: float = 0.1) -> None:
+def double_click(coords: Tuple[float, float], delay: float = 0.05) -> None:
     """
     Double-click at the specified coordinates.
     
@@ -49,7 +49,7 @@ def double_click(coords: Tuple[float, float], delay: float = 0.1) -> None:
         time.sleep(delay)
 
 
-def right_click(coords: Tuple[float, float], delay: float = 0.1) -> None:
+def right_click(coords: Tuple[float, float], delay: float = 0.05) -> None:
     """
     Right-click at the specified coordinates.
     
@@ -64,27 +64,27 @@ def right_click(coords: Tuple[float, float], delay: float = 0.1) -> None:
 
 
 def click_and_type(coords: Tuple[float, float], text: str, clear_first: bool = True, 
-                   type_interval: float = 0.05, delay: float = 0.5) -> None:
+                   type_interval: float = 0.02, delay: float = 0.2) -> None:
     """
     Click at coordinates and type text.
-    Optimized for slow laptops with slower typing intervals and longer delays.
+    Optimized for faster performance.
     
     Args:
         coords: Tuple of (x, y) coordinates
         text: Text to type
         clear_first: Whether to clear existing text first (Ctrl+A, Backspace)
-        type_interval: Delay between keystrokes (in seconds) - increased for slow laptops
-        delay: Delay after typing (in seconds) - increased for slow laptops
+        type_interval: Delay between keystrokes (in seconds)
+        delay: Delay after typing (in seconds)
     """
     x, y = coords
     pyautogui.click(x, y)
-    time.sleep(0.3)  # Increased wait for field focus
+    time.sleep(0.1)  # Wait for field focus
     
     if clear_first:
         pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.2)  # Increased wait for selection
+        time.sleep(0.05)  # Wait for selection
         pyautogui.press("backspace")
-        time.sleep(0.2)  # Increased wait for clearing
+        time.sleep(0.05)  # Wait for clearing
     
     pyautogui.typewrite(text, interval=type_interval)
     if delay > 0:
@@ -139,7 +139,7 @@ def wait(seconds: float) -> None:
 
 def wait_for_pixel_change(coords: Tuple[float, float], 
                          timeout: float = 10.0,
-                         check_interval: float = 0.3,
+                         check_interval: float = 0.1,
                          initial_color: Optional[Tuple[int, int, int]] = None,
                          min_change_threshold: int = 10) -> bool:
     """
@@ -188,8 +188,8 @@ def wait_for_pixel_change(coords: Tuple[float, float],
 
 def wait_for_element_ready(coords: Tuple[float, float], 
                           timeout: float = 10.0,
-                          check_interval: float = 0.3,
-                          stable_duration: float = 0.5) -> bool:
+                          check_interval: float = 0.1,
+                          stable_duration: float = 0.2) -> bool:
     """
     Wait until element at coordinates appears/is ready by checking pixel stability.
     Checks if pixel color stabilizes (doesn't change for stable_duration).
@@ -237,7 +237,7 @@ def wait_for_element_ready(coords: Tuple[float, float],
 
 
 def wait_for(condition: Callable[[], bool], timeout: float = 10.0, 
-             check_interval: float = 0.5, error_message: Optional[str] = None) -> bool:
+             check_interval: float = 0.2, error_message: Optional[str] = None) -> bool:
     """
     Wait until a condition is met or timeout occurs.
     
@@ -341,7 +341,7 @@ def click_image(image_path: str, confidence: float = 0.8,
 
 def wait_for_clipboard_change(initial_content: Optional[str] = None,
                              timeout: float = 5.0,
-                             check_interval: float = 0.2) -> str:
+                             check_interval: float = 0.1) -> str:
     """
     Wait until clipboard content changes from initial_content (or any change if None).
     Useful for waiting until a copy operation completes.
@@ -389,7 +389,7 @@ def get_clipboard(max_attempts: int = 3) -> str:
                 return content
         except Exception as e:
             if attempt < max_attempts - 1:
-                time.sleep(0.2)
+                time.sleep(0.1)
                 continue
             else:
                 print(f"    [!] Failed to read clipboard after {max_attempts} attempts: {e}")
@@ -497,7 +497,7 @@ def find_text_on_screen(text: str, region: Optional[Tuple[int, int, int, int]] =
 
 
 def wait_for_text(text: str, timeout: float = 10.0, 
-                 check_interval: float = 0.5,
+                 check_interval: float = 0.2,
                  region: Optional[Tuple[int, int, int, int]] = None,
                  case_sensitive: bool = False,
                  exact_match: bool = False,
@@ -662,7 +662,7 @@ def click_text(text: str, timeout: float = 10.0,
 
 
 def wait_till_visible(text: str, timeout: float = 10.0, 
-                     check_interval: float = 0.5,
+                     check_interval: float = 0.2,
                      region: Optional[Tuple[int, int, int, int]] = None,
                      case_sensitive: bool = False,
                      exact_match: bool = False,
@@ -711,7 +711,7 @@ def wait_till_visible(text: str, timeout: float = 10.0,
     return None
 
 
-def close_window(use_alt_f4: bool = True, delay: float = 0.5) -> None:
+def close_window(use_alt_f4: bool = True, delay: float = 0.2) -> None:
     """
     Close the currently active window.
     
@@ -729,7 +729,7 @@ def close_window(use_alt_f4: bool = True, delay: float = 0.5) -> None:
 
 
 def wait_till_save_dialog(timeout: float = 10.0, 
-                         check_interval: float = 0.5) -> bool:
+                         check_interval: float = 0.2) -> bool:
     """
     Wait until a save dialog appears on screen.
     Looks for common save dialog indicators like "Save As", "File name:", etc.
@@ -772,7 +772,7 @@ def wait_till_save_dialog(timeout: float = 10.0,
 
 
 def enter_save_file_name(filename: str, clear_first: bool = True,
-                        type_interval: float = 0.02, delay: float = 0.3) -> None:
+                        type_interval: float = 0.02, delay: float = 0.1) -> None:
     """
     Enter a filename in the save dialog filename field.
     First navigates to the filename field (usually by clicking or Tab).
@@ -807,12 +807,12 @@ def enter_save_file_name(filename: str, clear_first: bool = True,
         # Fallback: use Tab to navigate to filename field
         press_key("tab", interval=0.1)
     
-    time.sleep(0.2)
+    time.sleep(0.1)
     
     # Select all and clear if needed
     if clear_first:
-        hotkey("ctrl", "a", interval=0.05)
-        press_key("backspace", interval=0.05)
+        hotkey("ctrl", "a", interval=0.02)
+        press_key("backspace", interval=0.02)
     
     # Type the filename
     type_text(filename, interval=type_interval)
@@ -822,7 +822,7 @@ def enter_save_file_name(filename: str, clear_first: bool = True,
 
 
 def save_file(click_save_button: bool = True, use_enter: bool = True,
-             delay: float = 1.0) -> None:
+             delay: float = 0.3) -> None:
     """
     Click the Save button in a save dialog or press Enter to confirm save.
     
@@ -885,7 +885,7 @@ def retrieve_file(file_path: Optional[str] = None,
                     # Check if it looks like a file path
                     if "\\" in current_clipboard or "/" in current_clipboard:
                         return current_clipboard.strip()
-                time.sleep(0.5)
+                time.sleep(0.2)
             
             # Return current clipboard even if it didn't change much
             clipboard_content = get_clipboard().strip()

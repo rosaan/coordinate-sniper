@@ -42,27 +42,27 @@ def create_user(client_id: str, first_name: str, last_name: str,
     app = connect_or_start(exe_path)
     win = bring_up_window(app, window_title_regex)
     
-    # Give the app extra time to stabilize after startup (critical for slow laptops)
-    wait(3)
+    # Give the app time to stabilize after startup
+    wait(1)
     
     # Ensure VAEEG is closed at the end, even if there's an error
     try:
-        # Execute the create user sequence with extended delays
+        # Execute the create user sequence
         print("    [*] Clicking create user button...")
-        click(CREATE_USER_BTN, delay=0.5)
-        wait(2)  # Wait for form to load
+        click(CREATE_USER_BTN, delay=0.2)
+        wait(0.5)  # Wait for form to load
         
         print("    [*] Filling client ID...")
-        click_and_type(CLIENT_ID, client_id, type_interval=0.05, delay=1.5)
-        wait(1)  # Extra wait between fields
+        click_and_type(CLIENT_ID, client_id, type_interval=0.02, delay=0.3)
+        wait(0.2)  # Wait between fields
         
         print("    [*] Filling first name...")
-        click_and_type(FIRST_NAME, first_name, type_interval=0.05, delay=1.5)
-        wait(1)  # Extra wait between fields
+        click_and_type(FIRST_NAME, first_name, type_interval=0.02, delay=0.3)
+        wait(0.2)  # Wait between fields
         
         print("    [*] Filling last name...")
-        click_and_type(LAST_NAME, last_name, type_interval=0.05, delay=1.5)
-        wait(1)  # Extra wait before save
+        click_and_type(LAST_NAME, last_name, type_interval=0.02, delay=0.3)
+        wait(0.2)  # Wait before save
         
         # Save with retry logic to handle SQL error popups
         print("    [*] Saving user (with error handling)...")
@@ -75,8 +75,8 @@ def create_user(client_id: str, first_name: str, last_name: str,
             
             # Click save button
             print(f"    [*] Save attempt {save_retry_count}/{max_save_retries}...")
-            click(SAVE_BTN, delay=0.5)
-            wait(3)  # Wait longer for either success or error dialog to appear
+            click(SAVE_BTN, delay=0.2)
+            wait(1.5)  # Wait for either success or error dialog to appear
             
             # Check for error dialog popup (check multiple times as dialogs may appear slowly)
             error_dialog_found = False
@@ -84,11 +84,11 @@ def create_user(client_id: str, first_name: str, last_name: str,
                 error_dialog_found = find_and_close_error_dialog(
                     app, 
                     error_keywords=["error", "sql", "mysql", "exception", "failed", "warning", "server", "gone away"],
-                    timeout=2.0
+                    timeout=1.5
                 )
                 if error_dialog_found:
                     break
-                wait(1)  # Wait before checking again
+                wait(0.5)  # Wait before checking again
             
             if error_dialog_found:
                 print(f"    [!] MySQL/SQL error detected!")
@@ -126,16 +126,16 @@ def create_user(client_id: str, first_name: str, last_name: str,
             try:
                 # Wait for the window to appear
                 link_window = app.window(title_re="Patient link code")
-                link_window.wait("exists", timeout=10.0)
+                link_window.wait("exists", timeout=5.0)
                 print("    [✓] 'Patient link code' window appeared - save successful!")
                 link_dialog_ready = True
                 break
             except Exception:
                 # Window not found yet, wait and check again
-                wait(2)
+                wait(0.5)
                 try:
                     link_window = app.window(title_re="Patient link code")
-                    link_window.wait("exists", timeout=5.0)
+                    link_window.wait("exists", timeout=3.0)
                     print("    [✓] 'Patient link code' window appeared after extended wait - save successful!")
                     link_dialog_ready = True
                     break
@@ -147,7 +147,7 @@ def create_user(client_id: str, first_name: str, last_name: str,
             print("    [*] Waiting for 'Patient link code' window (extended wait)...")
             try:
                 link_window = app.window(title_re="Patient link code")
-                link_window.wait("exists", timeout=15.0)
+                link_window.wait("exists", timeout=8.0)
                 print("    [✓] 'Patient link code' window found")
             except Exception as e:
                 print(f"    [!] 'Patient link code' window not found: {e}")
@@ -157,15 +157,15 @@ def create_user(client_id: str, first_name: str, last_name: str,
         print("    [*] Focusing 'Patient link code' window...")
         try:
             link_window.set_focus()
-            link_window.wait("visible enabled", timeout=5.0)
-            wait(1)  # Give window time to fully focus
+            link_window.wait("visible enabled", timeout=3.0)
+            wait(0.3)  # Give window time to fully focus
             print("    [✓] Window focused")
         except Exception as e:
             print(f"    [!] Warning: Could not focus window: {e}")
             # Try to bring it up using bring_up_window method
             try:
-                bring_up_window(app, "Patient link code", timeout=5.0, maximize=False)
-                wait(1)
+                bring_up_window(app, "Patient link code", timeout=3.0, maximize=False)
+                wait(0.3)
             except Exception:
                 pass
         
@@ -190,15 +190,15 @@ def create_user(client_id: str, first_name: str, last_name: str,
             try:
                 # Method 1: Click copy button and wait for clipboard change
                 print("    [*] Clicking copy button in 'Patient link code' window...")
-                click(RECORDING_LINK_COPY, delay=0.5)
+                click(RECORDING_LINK_COPY, delay=0.2)
                 
                 # Wait for clipboard to actually change (more reliable than fixed wait)
                 try:
                     print("    [*] Waiting for clipboard to change...")
                     new_clipboard = wait_for_clipboard_change(
                         initial_content=clipboard_before,
-                        timeout=5.0,
-                        check_interval=0.2
+                        timeout=3.0,
+                        check_interval=0.1
                     )
                     print(f"    [✓] Clipboard changed detected!")
                 except TimeoutError:
@@ -208,23 +208,23 @@ def create_user(client_id: str, first_name: str, last_name: str,
                         import pyautogui
                         # Focus the window first
                         link_window.set_focus()
-                        wait(0.3)
+                        wait(0.1)
                         # Select all and copy
                         pyautogui.hotkey("ctrl", "a")
-                        wait(0.2)
+                        wait(0.1)
                         pyautogui.hotkey("ctrl", "c")
-                        wait(0.5)
+                        wait(0.2)
                         # Wait for clipboard change
                         new_clipboard = wait_for_clipboard_change(
                             initial_content=clipboard_before,
-                            timeout=3.0,
-                            check_interval=0.2
+                            timeout=2.0,
+                            check_interval=0.1
                         )
                         print(f"    [✓] Clipboard changed via Ctrl+C!")
                     except TimeoutError:
                         if retry_count < max_retries:
                             print(f"    [!] Clipboard still didn't change, retrying...")
-                            wait(1.0)
+                            wait(0.5)
                             continue
                         else:
                             raise RuntimeError(f"CLIPBOARD_COPY_FAILED: Could not copy link after {max_retries} attempts. Clipboard unchanged.")
@@ -251,7 +251,7 @@ def create_user(client_id: str, first_name: str, last_name: str,
                     if retry_count < max_retries:
                         # Update baseline and try again
                         clipboard_before = new_clipboard
-                        wait(1.0)
+                        wait(0.5)
                         continue
                     else:
                         # Max retries reached - report failure
@@ -264,14 +264,14 @@ def create_user(client_id: str, first_name: str, last_name: str,
                 # Otherwise continue retrying
                 if retry_count < max_retries:
                     print(f"    [!] Error: {e}, retrying...")
-                    wait(1.0)
+                    wait(0.5)
                     continue
                 else:
                     raise RuntimeError(f"CLIPBOARD_COPY_FAILED: {str(e)}")
             except Exception as e:
                 if retry_count < max_retries:
                     print(f"    [!] Unexpected error: {e}, retrying...")
-                    wait(1.0)
+                    wait(0.5)
                     continue
                 else:
                     raise RuntimeError(f"CLIPBOARD_COPY_FAILED: Unexpected error after {max_retries} attempts: {str(e)}")
@@ -292,8 +292,8 @@ def create_user(client_id: str, first_name: str, last_name: str,
                     raise RuntimeError(f"CLIPBOARD_COPY_FAILED: Could not verify clipboard contains user data. Got: '{final_clipboard[:100]}...'")
         
         print("    [*] Closing link dialog...")
-        click(CLOSE_LINK_CODE, delay=0.5)
-        wait(1)  # Wait for dialog to close
+        click(CLOSE_LINK_CODE, delay=0.2)
+        wait(0.3)  # Wait for dialog to close
         
         return url
     finally:

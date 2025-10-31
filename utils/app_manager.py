@@ -9,16 +9,16 @@ from pywinauto.findwindows import ElementNotFoundError
 from typing import Optional, List
 
 
-def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float = 5.0) -> Application:
+def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float = 2.0) -> Application:
     """
     Ensure fresh launch of VAEEG application - closes existing instances if running, then starts fresh.
     Handles login sequence: password entry, login button, and confirmation dialog.
-    Optimized for slow laptops with extended startup delay.
+    Optimized for faster performance.
     
     Args:
         exe_path: Full path to the executable
         backend: Pywinauto backend ('win32' or 'uia')
-        startup_delay: Delay after starting the application (in seconds) - increased for slow laptops
+        startup_delay: Delay after starting the application (in seconds)
         
     Returns:
         Application instance
@@ -39,7 +39,7 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
                 for win in windows:
                     try:
                         win.close()
-                        time.sleep(0.3)
+                        time.sleep(0.1)
                     except Exception:
                         pass
             except Exception:
@@ -48,7 +48,7 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
             try:
                 existing_app.kill()
                 print(f"[+] Closed existing instance")
-                time.sleep(2)  # Wait for process to fully close
+                time.sleep(1)  # Wait for process to fully close
             except Exception:
                 # Fallback: use taskkill
                 try:
@@ -56,7 +56,7 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
                     subprocess.run(["taskkill", "/F", "/IM", exe_name], 
                                  capture_output=True, timeout=5)
                     print(f"[+] Closed existing instance (via taskkill)")
-                    time.sleep(2)
+                    time.sleep(1)
                 except Exception:
                     pass
             break
@@ -64,12 +64,12 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
             pass
     
     # Start fresh instance
-    print(f"[+] Starting fresh instance: {exe_path} (this may take a moment on slow systems)...")
+    print(f"[+] Starting fresh instance: {exe_path}...")
     app = Application(backend=backend).start(exe_path)
-    # Extended delay for slow laptops to prevent crashes
+    # Delay for application to start
     time.sleep(startup_delay)
     print(f"[+] Application started, waiting for login screen...")
-    time.sleep(3)  # Additional stabilization time
+    time.sleep(1)  # Additional stabilization time
     
     # Handle login sequence
     print("[+] Starting login sequence...")
@@ -79,16 +79,16 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
     password_coord = (882.5, 582.5)
     print(f"    [*] Clicking password field at {password_coord}...")
     pyautogui.click(password_coord[0], password_coord[1])
-    time.sleep(0.5)
+    time.sleep(0.2)
     print("    [*] Entering password '1'...")
-    pyautogui.typewrite("1", interval=0.1)
-    time.sleep(0.5)
+    pyautogui.typewrite("1", interval=0.05)
+    time.sleep(0.2)
     
     # Step 2: Click login button
     login_button_coord = (892.5, 648.75)
     print(f"    [*] Clicking login button at {login_button_coord}...")
     pyautogui.click(login_button_coord[0], login_button_coord[1])
-    time.sleep(2)  # Wait for confirm dialog
+    time.sleep(1)  # Wait for confirm dialog
     
     # Step 3: Wait for "Confirm" dialog and click No
     print("    [*] Waiting for 'Confirm' dialog...")
@@ -102,7 +102,7 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
             break
         except Exception:
             if attempt < max_wait - 1:
-                time.sleep(0.5)
+                time.sleep(0.3)
             else:
                 print("    [!] 'Confirm' dialog not found, continuing anyway...")
     
@@ -113,20 +113,20 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
             no_button = confirm_dialog.child_window(title_re=re.compile("no", re.I))
             if no_button.exists():
                 no_button.click()
-                time.sleep(0.5)
+                time.sleep(0.2)
             else:
                 # Fallback: press N key (often selects No)
                 confirm_dialog.type_keys("N")
-                time.sleep(0.5)
+                time.sleep(0.2)
         except Exception:
             # Fallback: press N key
             try:
                 confirm_dialog.type_keys("N")
-                time.sleep(0.5)
+                time.sleep(0.2)
             except Exception:
                 print("    [!] Could not click No, trying Escape...")
                 confirm_dialog.type_keys("{ESC}")
-                time.sleep(0.5)
+                time.sleep(0.2)
     
     # Step 4: Wait for main app window "VAEEG - [Client]" to load
     print("    [*] Waiting for main app window 'VAEEG - [Client]' to load...")
@@ -144,7 +144,7 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
                 raise RuntimeError("Main app window 'VAEEG - [Client]' did not appear after login")
     
     print("[+] Login sequence completed, app is ready")
-    time.sleep(2)  # Final stabilization
+    time.sleep(0.5)  # Final stabilization
     
     return app
 
@@ -246,19 +246,19 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
         try:
             print("[+] Restoring minimized window...")
             win.restore()
-            time.sleep(0.3)  # Give it time to restore
+            time.sleep(0.1)  # Give it time to restore
             # Verify it's restored
             if win.is_minimized():
                 # Try alternative restore method
                 win.show()
                 win.restore()
-                time.sleep(0.3)
+                time.sleep(0.1)
         except Exception as e:
             print(f"[!] Warning: Failed to restore window: {e}")
             # Try show() as fallback
             try:
                 win.show()
-                time.sleep(0.3)
+                time.sleep(0.1)
             except Exception:
                 pass
     
@@ -269,7 +269,7 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
             try:
                 print("[+] Restoring maximized window to normal size...")
                 win.restore()
-                time.sleep(0.2)
+                time.sleep(0.1)
             except Exception as e:
                 print(f"[!] Warning: Failed to restore from maximized: {e}")
     
@@ -279,13 +279,13 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
             try:
                 print("[+] Maximizing window...")
                 win.maximize()
-                time.sleep(0.3)
+                time.sleep(0.1)
                 # Verify it's maximized
                 if not win.is_maximized():
                     # Try alternative maximize
                     win.set_focus()
                     win.maximize()
-                    time.sleep(0.3)
+                    time.sleep(0.1)
             except Exception as e:
                 print(f"[!] Warning: Failed to maximize window: {e}")
                 # Try alternative: set window size to screen size
@@ -293,7 +293,7 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
                     import pyautogui
                     screen_width, screen_height = pyautogui.size()
                     win.move_window(x=0, y=0, width=screen_width, height=screen_height)
-                    time.sleep(0.2)
+                    time.sleep(0.1)
                 except Exception:
                     pass
     
@@ -303,31 +303,31 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
             try:
                 # Method 1: set_focus
                 win.set_focus()
-                time.sleep(0.1)
+                time.sleep(0.05)
                 
                 # Method 2: Move to top (z-order)
                 win.set_focus()
                 win.move_window(x=win.rectangle().left, y=win.rectangle().top)
-                time.sleep(0.1)
+                time.sleep(0.05)
                 
                 # Method 3: Verify it's actually focused
                 if not win.has_focus():
                     win.set_focus()
-                    time.sleep(0.2)
+                    time.sleep(0.1)
                 else:
                     break
             except Exception as e:
                 if attempt == retry_count - 1:
                     print(f"[!] Warning: Failed to set focus: {e}")
                 else:
-                    time.sleep(0.2)
+                    time.sleep(0.1)
     
     # Final verification and adjustment
     try:
         # Ensure window is visible
         if not win.is_visible():
             win.show()
-            time.sleep(0.2)
+            time.sleep(0.1)
         
         # Ensure it's enabled
         if not win.is_enabled():
@@ -339,7 +339,7 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
             if final_state != 'maximized':
                 try:
                     win.maximize()
-                    time.sleep(0.2)
+                    time.sleep(0.1)
                 except Exception:
                     pass
         
@@ -347,7 +347,7 @@ def bring_up_window(app: Application, title_regex: str, timeout: float = 10.0,
         if force_foreground:
             if not win.has_focus():
                 win.set_focus()
-                time.sleep(0.1)
+                time.sleep(0.05)
     
     except Exception as e:
         print(f"[!] Warning: Final verification failed: {e}")
@@ -376,7 +376,7 @@ def find_and_close_error_dialog(app: Application,
     
     try:
         # Wait a bit for dialog to appear (dialogs might take time to show)
-        time.sleep(0.5)
+        time.sleep(0.2)
         
         # Method 1: Check using pywinauto windows
         windows = app.windows()
@@ -443,7 +443,7 @@ def find_and_close_error_dialog(app: Application,
                             if button.exists():
                                 print(f"    [*] Clicking '{btn_text}' button...")
                                 button.click()
-                                time.sleep(0.5)
+                                time.sleep(0.2)
                                 return True
                         except Exception:
                             try:
@@ -455,7 +455,7 @@ def find_and_close_error_dialog(app: Application,
                                         if btn_text in btn_text_lower:
                                             print(f"    [*] Clicking '{btn_text}' button (found by control type)...")
                                             btn.click()
-                                            time.sleep(0.5)
+                                            time.sleep(0.2)
                                             return True
                                     except Exception:
                                         continue
@@ -466,13 +466,13 @@ def find_and_close_error_dialog(app: Application,
                     try:
                         print("    [*] Pressing Enter to close dialog...")
                         win.type_keys("{ENTER}")
-                        time.sleep(0.5)
+                        time.sleep(0.2)
                         return True
                     except Exception:
                         try:
                             print("    [*] Pressing Escape to close dialog...")
                             win.type_keys("{ESC}")
-                            time.sleep(0.5)
+                            time.sleep(0.2)
                             return True
                         except Exception:
                             pass
@@ -485,7 +485,7 @@ def find_and_close_error_dialog(app: Application,
                         bottom_y = rect.top + rect.height() - 30
                         import pyautogui
                         pyautogui.click(center_x, bottom_y)
-                        time.sleep(0.5)
+                        time.sleep(0.2)
                         print("    [*] Clicked dialog center-bottom (OK button area)")
                         return True
                     except Exception:
@@ -511,7 +511,7 @@ def find_and_close_error_dialog(app: Application,
                             # Try to close it
                             try:
                                 win.type_keys("{ENTER}")
-                                time.sleep(0.5)
+                                time.sleep(0.2)
                                 return True
                             except Exception:
                                 import pyautogui
@@ -519,7 +519,7 @@ def find_and_close_error_dialog(app: Application,
                                 center_x = rect.left + (rect.width() // 2)
                                 bottom_y = rect.top + rect.height() - 30
                                 pyautogui.click(center_x, bottom_y)
-                                time.sleep(0.5)
+                                time.sleep(0.2)
                                 return True
                 except Exception:
                     continue
@@ -549,7 +549,7 @@ def close_application(app: Application, exe_path: str = None) -> None:
             for win in windows:
                 try:
                     win.close()
-                    time.sleep(0.3)
+                    time.sleep(0.1)
                 except Exception:
                     pass
         except Exception:
@@ -559,7 +559,7 @@ def close_application(app: Application, exe_path: str = None) -> None:
         try:
             app.kill()
             print("    [✓] VAEEG application closed")
-            time.sleep(1)  # Give it time to fully close
+            time.sleep(0.5)  # Give it time to fully close
         except Exception:
             # Fallback: use taskkill if available
             if exe_path:
@@ -569,7 +569,7 @@ def close_application(app: Application, exe_path: str = None) -> None:
                     subprocess.run(["taskkill", "/F", "/IM", exe_name], 
                                  capture_output=True, timeout=5)
                     print("    [✓] VAEEG application closed (via taskkill)")
-                    time.sleep(1)
+                    time.sleep(0.5)
                 except Exception:
                     print("    [!] Could not close VAEEG application")
     except Exception as e:

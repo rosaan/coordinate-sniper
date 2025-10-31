@@ -332,10 +332,9 @@ def sync_loop(client: ConvexClient, db: LocalDB) -> None:
                 # Process the user
                 process_user(user, client, db)
                 
-                # Extended wait before processing next user (critical for slow laptops)
-                # This gives VAEEG time to fully complete operations and prevents crashes
-                print("[+] Waiting 15 seconds before next user (allowing VAEEG to stabilize)...")
-                time.sleep(15)
+                # Wait before processing next user (allows VAEEG to stabilize)
+                print("[+] Waiting 3 seconds before next user (allowing VAEEG to stabilize)...")
+                time.sleep(3)
                 
     except KeyboardInterrupt:
         print("\n[+] Sync engine stopped by user")
