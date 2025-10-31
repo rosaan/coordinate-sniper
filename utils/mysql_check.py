@@ -10,8 +10,8 @@ MYSQL_CONFIG = {
     "host": "localhost",
     "user": "root",
     "password": "",
-    "database": "va",
-    "charset": "utf8mb4"
+    "database": "va"
+    # Note: MySQL v4 doesn't support utf8mb4 charset, so we omit it
 }
 
 
