@@ -69,11 +69,50 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
     # Delay for application to start
     time.sleep(startup_delay)
     print(f"[+] Application started, waiting for login screen...")
-    time.sleep(1.5)  # Additional stabilization time - ensure app window is ready
+    
+    # Wait for "VA Sign in" window to appear and be ready
+    print("[+] Waiting for 'VA Sign in' window to appear...")
+    signin_window = None
+    max_wait = 20  # Up to 20 seconds
+    for attempt in range(max_wait):
+        try:
+            signin_window = app.window(title_re="VA Sign in")
+            signin_window.wait("exists", timeout=1.0)
+            print("    [✓] 'VA Sign in' window found")
+            break
+        except Exception:
+            if attempt < max_wait - 1:
+                time.sleep(0.5)
+            else:
+                raise RuntimeError("'VA Sign in' window did not appear after starting application")
+    
+    # Focus and ensure the sign-in window is ready
+    print("[+] Focusing 'VA Sign in' window...")
+    try:
+        signin_window.set_focus()
+        signin_window.wait("visible enabled", timeout=5.0)
+        time.sleep(0.5)  # Give window time to fully focus
+        print("    [✓] 'VA Sign in' window is focused and ready")
+    except Exception as e:
+        print(f"    [!] Warning: Could not focus sign-in window: {e}")
+        # Try alternative method
+        try:
+            signin_window.show()
+            signin_window.set_focus()
+            time.sleep(0.5)
+        except Exception:
+            pass
     
     # Handle login sequence
     print("[+] Starting login sequence...")
     import pyautogui
+    
+    # Ensure sign-in window is still focused before actions
+    try:
+        signin_window.set_focus()
+        time.sleep(0.2)
+    except Exception:
+        pass
     
     # Step 1: Click password field and enter "1"
     password_coord = (882.5, 582.5)
@@ -83,6 +122,13 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
     print("    [*] Entering password '1'...")
     pyautogui.typewrite("1", interval=0.05)
     time.sleep(0.3)  # Wait after typing
+    
+    # Ensure sign-in window is still focused before clicking login button
+    try:
+        signin_window.set_focus()
+        time.sleep(0.2)
+    except Exception:
+        pass
     
     # Step 2: Click login button
     login_button_coord = (892.5, 648.75)
