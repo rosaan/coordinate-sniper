@@ -69,7 +69,7 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
     # Delay for application to start
     time.sleep(startup_delay)
     print(f"[+] Application started, waiting for login screen...")
-    time.sleep(1)  # Additional stabilization time
+    time.sleep(1.5)  # Additional stabilization time - ensure app window is ready
     
     # Handle login sequence
     print("[+] Starting login sequence...")
@@ -79,16 +79,16 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
     password_coord = (882.5, 582.5)
     print(f"    [*] Clicking password field at {password_coord}...")
     pyautogui.click(password_coord[0], password_coord[1])
-    time.sleep(0.2)
+    time.sleep(0.4)  # Wait for field to be focused
     print("    [*] Entering password '1'...")
     pyautogui.typewrite("1", interval=0.05)
-    time.sleep(0.2)
+    time.sleep(0.3)  # Wait after typing
     
     # Step 2: Click login button
     login_button_coord = (892.5, 648.75)
     print(f"    [*] Clicking login button at {login_button_coord}...")
     pyautogui.click(login_button_coord[0], login_button_coord[1])
-    time.sleep(1)  # Wait for confirm dialog
+    time.sleep(1.5)  # Wait for confirm dialog to appear
     
     # Step 3: Wait for "Confirm" dialog and click No
     print("    [*] Waiting for 'Confirm' dialog...")
@@ -109,24 +109,29 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
     if confirm_dialog:
         print("    [*] Clicking 'No' on Confirm dialog...")
         try:
+            # Ensure dialog is focused
+            confirm_dialog.set_focus()
+            time.sleep(0.3)
             # Try to find No button
             no_button = confirm_dialog.child_window(title_re=re.compile("no", re.I))
             if no_button.exists():
                 no_button.click()
-                time.sleep(0.2)
+                time.sleep(0.3)
             else:
                 # Fallback: press N key (often selects No)
                 confirm_dialog.type_keys("N")
-                time.sleep(0.2)
+                time.sleep(0.3)
         except Exception:
             # Fallback: press N key
             try:
-                confirm_dialog.type_keys("N")
+                confirm_dialog.set_focus()
                 time.sleep(0.2)
+                confirm_dialog.type_keys("N")
+                time.sleep(0.3)
             except Exception:
                 print("    [!] Could not click No, trying Escape...")
                 confirm_dialog.type_keys("{ESC}")
-                time.sleep(0.2)
+                time.sleep(0.3)
     
     # Step 4: Wait for main app window "VAEEG - [Client]" to load
     print("    [*] Waiting for main app window 'VAEEG - [Client]' to load...")
@@ -144,7 +149,7 @@ def connect_or_start(exe_path: str, backend: str = "win32", startup_delay: float
                 raise RuntimeError("Main app window 'VAEEG - [Client]' did not appear after login")
     
     print("[+] Login sequence completed, app is ready")
-    time.sleep(0.5)  # Final stabilization
+    time.sleep(1.0)  # Final stabilization - ensure app is fully ready
     
     return app
 

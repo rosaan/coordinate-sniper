@@ -45,24 +45,32 @@ def create_user(client_id: str, first_name: str, last_name: str,
     # Give the app time to stabilize after startup
     wait(1)
     
+    # Ensure main window is focused and ready before actions
+    try:
+        win.set_focus()
+        win.wait("visible enabled", timeout=3.0)
+        wait(0.5)  # Ensure window is fully focused
+    except Exception:
+        pass  # Continue anyway
+    
     # Ensure VAEEG is closed at the end, even if there's an error
     try:
         # Execute the create user sequence
         print("    [*] Clicking create user button...")
-        click(CREATE_USER_BTN, delay=0.2)
-        wait(0.5)  # Wait for form to load
+        click(CREATE_USER_BTN, delay=0.3)
+        wait(1.0)  # Wait for form to load and be ready
         
         print("    [*] Filling client ID...")
         click_and_type(CLIENT_ID, client_id, type_interval=0.02, delay=0.3)
-        wait(0.2)  # Wait between fields
+        wait(0.3)  # Wait between fields to ensure field is ready
         
         print("    [*] Filling first name...")
         click_and_type(FIRST_NAME, first_name, type_interval=0.02, delay=0.3)
-        wait(0.2)  # Wait between fields
+        wait(0.3)  # Wait between fields to ensure field is ready
         
         print("    [*] Filling last name...")
         click_and_type(LAST_NAME, last_name, type_interval=0.02, delay=0.3)
-        wait(0.2)  # Wait before save
+        wait(0.5)  # Wait before save to ensure form is ready
         
         # Save with retry logic to handle SQL error popups
         print("    [*] Saving user (with error handling)...")
@@ -75,8 +83,14 @@ def create_user(client_id: str, first_name: str, last_name: str,
             
             # Click save button
             print(f"    [*] Save attempt {save_retry_count}/{max_save_retries}...")
-            click(SAVE_BTN, delay=0.2)
-            wait(1.5)  # Wait for either success or error dialog to appear
+            # Ensure window is focused before saving
+            try:
+                win.set_focus()
+                wait(0.2)
+            except Exception:
+                pass
+            click(SAVE_BTN, delay=0.3)
+            wait(2.0)  # Wait for either success or error dialog to appear
             
             # Check for error dialog popup (check multiple times as dialogs may appear slowly)
             error_dialog_found = False
@@ -157,15 +171,15 @@ def create_user(client_id: str, first_name: str, last_name: str,
         print("    [*] Focusing 'Patient link code' window...")
         try:
             link_window.set_focus()
-            link_window.wait("visible enabled", timeout=3.0)
-            wait(0.3)  # Give window time to fully focus
-            print("    [✓] Window focused")
+            link_window.wait("visible enabled", timeout=5.0)
+            wait(0.8)  # Give window time to fully focus and be ready for interaction
+            print("    [✓] Window focused and ready")
         except Exception as e:
             print(f"    [!] Warning: Could not focus window: {e}")
             # Try to bring it up using bring_up_window method
             try:
-                bring_up_window(app, "Patient link code", timeout=3.0, maximize=False)
-                wait(0.3)
+                bring_up_window(app, "Patient link code", timeout=5.0, maximize=False)
+                wait(0.8)
             except Exception:
                 pass
         
@@ -190,7 +204,13 @@ def create_user(client_id: str, first_name: str, last_name: str,
             try:
                 # Method 1: Click copy button and wait for clipboard change
                 print("    [*] Clicking copy button in 'Patient link code' window...")
-                click(RECORDING_LINK_COPY, delay=0.2)
+                # Ensure window is still focused before clicking
+                try:
+                    link_window.set_focus()
+                    wait(0.3)
+                except Exception:
+                    pass
+                click(RECORDING_LINK_COPY, delay=0.3)
                 
                 # Wait for clipboard to actually change (more reliable than fixed wait)
                 try:
@@ -208,12 +228,12 @@ def create_user(client_id: str, first_name: str, last_name: str,
                         import pyautogui
                         # Focus the window first
                         link_window.set_focus()
-                        wait(0.1)
+                        wait(0.5)  # Ensure window is focused
                         # Select all and copy
                         pyautogui.hotkey("ctrl", "a")
-                        wait(0.1)
+                        wait(0.2)  # Wait for selection
                         pyautogui.hotkey("ctrl", "c")
-                        wait(0.2)
+                        wait(0.3)  # Wait for copy to complete
                         # Wait for clipboard change
                         new_clipboard = wait_for_clipboard_change(
                             initial_content=clipboard_before,

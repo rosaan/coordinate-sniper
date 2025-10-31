@@ -67,7 +67,7 @@ def click_and_type(coords: Tuple[float, float], text: str, clear_first: bool = T
                    type_interval: float = 0.02, delay: float = 0.2) -> None:
     """
     Click at coordinates and type text.
-    Optimized for faster performance.
+    Ensures field is focused before typing.
     
     Args:
         coords: Tuple of (x, y) coordinates
@@ -78,13 +78,13 @@ def click_and_type(coords: Tuple[float, float], text: str, clear_first: bool = T
     """
     x, y = coords
     pyautogui.click(x, y)
-    time.sleep(0.1)  # Wait for field focus
+    time.sleep(0.3)  # Wait for field to be focused and ready
     
     if clear_first:
         pyautogui.hotkey("ctrl", "a")
-        time.sleep(0.05)  # Wait for selection
+        time.sleep(0.1)  # Wait for selection to complete
         pyautogui.press("backspace")
-        time.sleep(0.05)  # Wait for clearing
+        time.sleep(0.1)  # Wait for clearing to complete
     
     pyautogui.typewrite(text, interval=type_interval)
     if delay > 0:
