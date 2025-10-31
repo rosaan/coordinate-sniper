@@ -230,6 +230,7 @@ class LocalDB:
     def reset_user(self, user_id: str) -> None:
         """
         Reset a user to pending status (for retry).
+        Clears error message, resets retry count, and marks as pending.
         
         Args:
             user_id: Convex user ID
@@ -240,6 +241,9 @@ class LocalDB:
         cursor.execute("""
             UPDATE users 
             SET status = ?,
+                error_message = NULL,
+                retry_count = 0,
+                recording_link = NULL,
                 processed_at = NULL,
                 updated_at = CURRENT_TIMESTAMP
             WHERE user_id = ?

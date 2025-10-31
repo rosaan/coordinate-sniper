@@ -299,19 +299,33 @@ def sync_loop(client: ConvexClient, db: LocalDB) -> None:
             # Process each user
             for user in users:
                 user_id = user["_id"]
+                sync_status = user.get("syncStatus")
+                
+                # Check if user has been reset for retry in Convex
+                # If Convex says "pending" but local DB says FAILED, reset local status
+                local_user = db.get_user(user_id)
+                if local_user and sync_status == "pending":
+                    if local_user["status"] == UserStatus.FAILED or local_user["status"] == UserStatus.COMPLETED:
+                        print(f"[+] User {user_id} reset for retry in Convex - resetting local status...")
+                        db.reset_user(user_id)
+                        print(f"[✓] Local status reset to PENDING (retry count cleared)")
                 
                 # Skip if already completed in local DB
                 if db.is_user_processed(user_id):
                     continue
                 
                 # Skip if user is FAILED with MySQL error flag (prevent create->delete loop)
-                local_user = db.get_user(user_id)
+                # UNLESS they've been explicitly reset for retry (syncStatus === "pending")
                 if local_user:
                     if local_user["status"] == UserStatus.FAILED:
                         error_msg = local_user.get("error_message", "")
                         if "MYSQL_ERROR_DELETED" in error_msg or "MYSQL_ERROR_DELETED_FLAGGED" in error_msg:
-                            print(f"[+] Skipping user {user_id} - flagged as FAILED due to MySQL error (create->delete loop prevented)")
-                            continue
+                            # Only skip if NOT reset for retry
+                            if sync_status != "pending":
+                                print(f"[+] Skipping user {user_id} - flagged as FAILED due to MySQL error (create->delete loop prevented)")
+                                continue
+                            else:
+                                print(f"[+] User {user_id} was reset for retry - will attempt again")
                 
                 # Process the user
                 process_user(user, client, db)

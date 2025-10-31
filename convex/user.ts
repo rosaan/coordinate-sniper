@@ -89,13 +89,19 @@ export const listPendingUsers = query({
     const allUsers = await ctx.db.query("users").collect();
     // Filter users that haven't been created locally yet
     // Also exclude users with critical errors that need manual intervention
+    // UNLESS they've been explicitly reset for retry (syncStatus === "pending")
     return allUsers.filter((user) => {
+      // Include users explicitly marked as pending (including retries)
+      if (user.syncStatus === "pending" || !user.syncStatus) {
+        return true;
+      }
       // Skip completed users
       if (user.isCreatedLocally === true) {
         return false;
       }
       // Skip users with critical errors (client_id_mismatch, delete_failed, mysql_error_deleted, clipboard_copy_failed)
       // These need manual intervention and shouldn't be retried automatically
+      // UNLESS they've been reset via retryUser mutation
       if (
         user.syncStatus === "client_id_mismatch" ||
         user.syncStatus === "delete_failed" ||
@@ -151,6 +157,29 @@ export const updateSyncStatus = mutation({
     await ctx.db.patch(args.userId, {
       syncStatus: args.syncStatus,
       errorReason: args.errorReason,
+    });
+    return null;
+  },
+});
+
+/**
+ * Reset a user for retry - clears sync status and error, marks as pending.
+ * This allows users that failed or were skipped to be retried.
+ */
+export const retryUser = mutation({
+  args: {
+    userId: v.id("users"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+    await ctx.db.patch(args.userId, {
+      syncStatus: "pending",
+      errorReason: undefined,
+      isCreatedLocally: false,
     });
     return null;
   },
