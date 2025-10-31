@@ -117,6 +117,7 @@ export const listPendingUsers = query({
 
 /**
  * Update a user with the recording link and mark as created locally.
+ * Appends to recordingInstruction array instead of replacing (stacks data).
  */
 export const updateRecordingLink = mutation({
   args: {
@@ -129,8 +130,15 @@ export const updateRecordingLink = mutation({
     if (!user) {
       throw new Error("User not found");
     }
+
+    // Get existing recordingInstruction array or initialize empty array
+    const existingInstructions = user.recordingInstruction || [];
+
+    // Append new recording link (don't overwrite, stack the data)
+    const updatedInstructions = [...existingInstructions, args.recordingLink];
+
     await ctx.db.patch(args.userId, {
-      recordingInstruction: [args.recordingLink],
+      recordingInstruction: updatedInstructions,
       isCreatedLocally: true,
       syncStatus: "completed",
       errorReason: undefined,
@@ -165,6 +173,7 @@ export const updateSyncStatus = mutation({
 /**
  * Reset a user for retry - clears sync status and error, marks as pending.
  * This allows users that failed or were skipped to be retried.
+ * Preserves recordingInstruction array (doesn't clear it - data is stacked).
  */
 export const retryUser = mutation({
   args: {
@@ -180,6 +189,7 @@ export const retryUser = mutation({
       syncStatus: "pending",
       errorReason: undefined,
       isCreatedLocally: false,
+      // Do NOT clear recordingInstruction - preserve stacked data
     });
     return null;
   },

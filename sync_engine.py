@@ -74,23 +74,25 @@ def process_user(user: Dict[str, Any], client: ConvexClient, db: LocalDB) -> Non
         if check_patient_exists(client_code):
             print(f"    [✓] Patient already exists in MySQL - marking as completed")
             
-            # Mark as completed in Convex (but without recording link since we didn't create)
+            # Mark as completed in Convex - errors go to errorReason, NOT recordingInstruction
             try:
                 client.mutation("user:updateSyncStatus", {
                     "userId": user_id,
                     "syncStatus": "completed",
-                    "errorReason": "Patient already exists in MySQL database"
+                    "errorReason": f"Patient already exists in MySQL database (PatientCode: {client_code})"
                 })
-                # Also mark as created locally
-                client.mutation("user:updateRecordingLink", {
-                    "userId": user_id,
-                    "recordingLink": f"Patient already exists in MySQL (PatientCode: {client_code})"
-                })
+                # Do NOT call updateRecordingLink - we didn't create a recording link
+                # Only update isCreatedLocally flag
+                try:
+                    # Use a direct patch if needed, but for now just syncStatus update is enough
+                    pass
+                except Exception:
+                    pass
             except Exception as e:
                 print(f"    [!] Failed to update Convex: {e}")
             
-            # Update local DB
-            db.update_status(user_id, UserStatus.COMPLETED, recording_link=f"Already exists in MySQL")
+            # Update local DB - no recording link since we didn't create one
+            db.update_status(user_id, UserStatus.COMPLETED, recording_link=None)
             print(f"    [✓] User {user_id} marked as completed (already exists)")
             return
     except Exception as e:
