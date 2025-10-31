@@ -371,14 +371,29 @@ def wait_for_clipboard_change(initial_content: Optional[str] = None,
     raise TimeoutError(f"Clipboard did not change within {timeout} seconds")
 
 
-def get_clipboard() -> str:
+def get_clipboard(max_attempts: int = 3) -> str:
     """
-    Get the current clipboard contents.
+    Get the current clipboard contents with retry logic for reliability.
     
+    Args:
+        max_attempts: Maximum number of attempts to read clipboard
+        
     Returns:
         Clipboard text content
     """
-    return pyperclip.paste()
+    for attempt in range(max_attempts):
+        try:
+            content = pyperclip.paste()
+            # Verify we got something valid
+            if content is not None:
+                return content
+        except Exception as e:
+            if attempt < max_attempts - 1:
+                time.sleep(0.2)
+                continue
+            else:
+                print(f"    [!] Failed to read clipboard after {max_attempts} attempts: {e}")
+    return ""
 
 
 def set_clipboard(text: str) -> None:

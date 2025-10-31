@@ -115,7 +115,27 @@ def process_user(user: Dict[str, Any], client: ConvexClient, db: LocalDB) -> Non
         print(f"    [✗] Error processing user {user_id}: {error_msg}")
         
         # Determine status based on error type
-        if "MYSQL_ERROR_DELETED" in error_msg:
+        if "CLIPBOARD_COPY_FAILED" in error_msg:
+            # Clipboard copy failed - report to backend
+            sync_status = "clipboard_copy_failed"
+            print(f"    [*] Reporting clipboard copy failure to backend: {sync_status}")
+            
+            # Report to backend
+            try:
+                client.mutation("user:updateSyncStatus", {
+                    "userId": user_id,
+                    "syncStatus": sync_status,
+                    "errorReason": error_msg
+                })
+                print(f"    [✓] Status reported to backend")
+            except Exception as backend_error:
+                print(f"    [!] Failed to report status to backend: {backend_error}")
+            
+            # Update local DB
+            db.update_status(user_id, UserStatus.FAILED, error_message=error_msg)
+            print(f"    [*] User will NOT be retried - requires manual intervention")
+            
+        elif "MYSQL_ERROR_DELETED" in error_msg:
             # MySQL error - user already deleted from VAEEG and local DB
             sync_status = "mysql_error_deleted"
             print(f"    [*] Reporting MySQL error to backend: {sync_status}")
