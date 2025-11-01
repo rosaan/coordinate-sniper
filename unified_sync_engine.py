@@ -389,18 +389,28 @@ def sync_loop(client: ConvexClient, db: Optional[LocalDB] = None) -> None:
     
     try:
         # Subscribe to pending operations query
+        print("[*] Subscribing to pending operations...")
         for operations in client.subscribe("operations:listPendingOperations"):
+            print(f"[*] Received update: {len(operations) if operations else 0} pending operations")
+            
             if not operations:
+                print("[*] No pending operations, waiting...")
                 continue
+            
+            print(f"[+] Found {len(operations)} pending operation(s) to process")
             
             # Process each operation
             for operation in operations:
                 operation_id = operation["_id"]
                 operation_type = operation["operationType"]
                 status = operation.get("status")
+                user_name = operation.get("user", {}).get("firstName", "unknown")
+                
+                print(f"\n[+] Processing operation: {operation_type} for user {user_name} (ID: {operation_id})")
                 
                 # Skip if not pending (shouldn't happen, but safety check)
                 if status != "pending":
+                    print(f"[!] Skipping operation {operation_id} - status is '{status}', expected 'pending'")
                     continue
                 
                 # Process the operation
@@ -441,9 +451,15 @@ def verify_setup(client: ConvexClient) -> bool:
     try:
         test_result = client.query("operations:listPendingOperations")
         print(f"[✓] Convex connection verified (found {len(test_result)} pending operations)")
+        if test_result:
+            print("[*] Pending operations found:")
+            for op in test_result:
+                print(f"    - {op['operationType']} for user {op['user']['firstName']} (ID: {op['_id']})")
         return True
     except Exception as e:
         print(f"[✗] Failed to verify Convex connection: {e}")
+        import traceback
+        traceback.print_exception(type(e), e, e.__traceback__)
         print(f"[!] Make sure:")
         print(f"    1. CONVEX_URL is correct in .env.local")
         print(f"    2. Convex dev server is running (npx convex dev)")

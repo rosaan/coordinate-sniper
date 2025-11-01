@@ -1,8 +1,8 @@
 """
 Main entry point for the automation project.
-Runs the sync engine to watch Convex for new users and create them in VAEEG.
+Runs the unified sync engine to process queued operations from Convex.
 """
-from sync_engine import main
+from unified_sync_engine import main
 
 if __name__ == "__main__":
     main()

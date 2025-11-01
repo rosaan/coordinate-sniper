@@ -384,12 +384,17 @@ export const getMindReport = mutation({
         }
       );
 
+      console.log(
+        `[getMindReport] Queued operation ${operationId} for user ${user.firstName} (${user.clientCode})`
+      );
+
       return {
         success: true,
         message: `Mind report import queued for user ${user.firstName} (${user.clientCode})`,
         operationId: operationId,
       };
     } catch (error: any) {
+      console.error(`[getMindReport] Error queueing operation:`, error);
       if (error.message?.includes("already queued")) {
         return {
           success: false,
@@ -397,7 +402,9 @@ export const getMindReport = mutation({
           operationId: undefined,
         };
       }
-      throw error;
+      throw new ConvexError(
+        `Failed to queue mind report operation: ${error.message}`
+      );
     }
   },
 });
