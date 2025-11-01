@@ -231,7 +231,8 @@ def scan_grid_with_ocr(region: Tuple[int, int, int, int]) -> List[Tuple[str, str
 
 def get_grid_entries(win, scan_region: Optional[Tuple[int, int, int, int]] = None) -> Tuple[List[Tuple[str, str, int, int]], Optional[List[Tuple[str, str, int, Tuple[int, int]]]]]:
     """
-    Get all entries from the grid control.
+    Get all entries from the grid control using pywinauto.
+    Uses multiple pywinauto methods to access TDBGrid rows and cells.
     Falls back to OCR scanning if scan_region is provided and standard methods fail.
     
     Args:
@@ -263,82 +264,278 @@ def get_grid_entries(win, scan_region: Optional[Tuple[int, int, int, int]] = Non
                 return entries, ocr_entries_with_coords
             return entries, None
         
-        # Method 1: Try to get all row text from grid
+        # Get grid rectangle for coordinate calculation
+        rect = grid.rectangle()
+        row_height = 0
+        
+        # Method 1: Try item_count() and item_text() - standard pywinauto grid access
         try:
-            grid_text = grid.window_text()
-            if grid_text:
-                # Split by lines and parse each
-                lines = grid_text.split('\n')
-                for idx, line in enumerate(lines):
-                    parsed = parse_grid_entry(line)
-                    if parsed:
-                        date_str, time_str, code = parsed
-                        entries.append((date_str, time_str, code, idx))
+            # Get number of rows
+            if hasattr(grid, 'item_count'):
+                row_count = grid.item_count()
+                print(f"    [*] Grid has {row_count} rows (via item_count)")
+                
+                if row_count > 0:
+                    row_height = rect.height() // max(row_count, 1)
+                    
+                    for row_idx in range(row_count):
+                        try:
+                            # Try item_text() method
+                            row_text = grid.item_text(row_idx)
+                            if row_text:
+                                parsed = parse_grid_entry(row_text)
+                                if parsed:
+                                    date_str, time_str, code = parsed
+                                    entries.append((date_str, time_str, code, row_idx))
+                                    print(f"        Row {row_idx}: {row_text}")
+                        except Exception as e:
+                            # item_text might not work for this grid type
+                            continue
+                    
+                    if entries:
+                        print(f"    [✓] Found {len(entries)} entries via item_text()")
+                        return entries, None
+            else:
+                print("    [*] Grid doesn't have item_count() method")
+        except Exception as e:
+            print(f"    [*] Method 1 (item_text) failed: {e}")
+        
+        # Method 2: Try cells() method - access individual cells
+        try:
+            if hasattr(grid, 'cells'):
+                cells = grid.cells()
+                print(f"    [*] Grid has {len(cells)} cells")
+                
+                # Group cells by row (assuming first column contains full row data)
+                row_dict = {}
+                for cell in cells:
+                    try:
+                        cell_text = cell.window_text()
+                        if cell_text:
+                            # Try to get row index from cell position
+                            cell_rect = cell.rectangle()
+                            # Estimate row index based on y position
+                            if row_height == 0:
+                                row_height = max(cell_rect.height(), 20)
+                            estimated_row = (cell_rect.top - rect.top) // max(row_height, 1)
+                            
+                            parsed = parse_grid_entry(cell_text)
+                            if parsed:
+                                date_str, time_str, code = parsed
+                                if estimated_row not in row_dict:
+                                    row_dict[estimated_row] = []
+                                row_dict[estimated_row].append((date_str, time_str, code, estimated_row))
+                    except Exception:
+                        continue
+                
+                # Deduplicate rows and add to entries
+                for row_idx in sorted(row_dict.keys()):
+                    # Take first entry from each row
+                    if row_dict[row_idx]:
+                        entries.append(row_dict[row_idx][0])
+                
                 if entries:
-                    print(f"    [✓] Found {len(entries)} entries via window_text()")
+                    print(f"    [✓] Found {len(entries)} entries via cells()")
                     return entries, None
         except Exception as e:
-            print(f"    [*] Method 1 failed: {e}")
+            print(f"    [*] Method 2 (cells) failed: {e}")
         
-        # Method 2: Try to get text from grid cells
+        # Method 3: Try to get text from all child windows (cells might be children)
         try:
-            # Try to access grid rows/cells
-            # TDBGrid might expose items via item_text() or similar
-            for row_idx in range(10):  # Check up to 10 rows
+            children = grid.children()
+            print(f"    [*] Grid has {len(children)} child windows")
+            
+            # Try to extract text from each child
+            for idx, child in enumerate(children):
                 try:
-                    # Try different ways to get cell text
-                    cell_text = None
-                    
-                    # Try item_text if available
-                    if hasattr(grid, 'item_text'):
-                        cell_text = grid.item_text(row_idx)
-                    
-                    # Try getting text from first child window (cell)
-                    if not cell_text:
-                        try:
-                            cells = grid.children()
-                            if cells and row_idx < len(cells):
-                                cell_text = cells[row_idx].window_text()
-                        except Exception:
-                            pass
-                    
-                    if cell_text:
-                        parsed = parse_grid_entry(cell_text)
+                    child_text = child.window_text()
+                    if child_text:
+                        parsed = parse_grid_entry(child_text)
                         if parsed:
                             date_str, time_str, code = parsed
-                            entries.append((date_str, time_str, code, row_idx))
+                            entries.append((date_str, time_str, code, idx))
+                            print(f"        Child {idx}: {child_text}")
                 except Exception:
                     continue
             
             if entries:
-                print(f"    [✓] Found {len(entries)} entries via cell access")
+                print(f"    [✓] Found {len(entries)} entries via children()")
                 return entries, None
         except Exception as e:
-            print(f"    [*] Method 2 failed: {e}")
+            print(f"    [*] Method 3 (children) failed: {e}")
         
-        # Method 3: Try to get text from all descendants
+        # Method 4: Try descendants() - more comprehensive search
         try:
             descendants = grid.descendants()
+            print(f"    [*] Grid has {len(descendants)} descendants")
+            
+            seen_texts = set()  # Avoid duplicates
             for idx, desc in enumerate(descendants):
                 try:
                     desc_text = desc.window_text()
-                    if desc_text:
+                    if desc_text and desc_text not in seen_texts:
+                        seen_texts.add(desc_text)
                         parsed = parse_grid_entry(desc_text)
                         if parsed:
                             date_str, time_str, code = parsed
                             entries.append((date_str, time_str, code, idx))
+                            print(f"        Descendant {idx}: {desc_text}")
                 except Exception:
                     continue
             
             if entries:
-                print(f"    [✓] Found {len(entries)} entries via descendants")
+                print(f"    [✓] Found {len(entries)} entries via descendants()")
                 return entries, None
         except Exception as e:
-            print(f"    [*] Method 3 failed: {e}")
+            print(f"    [*] Method 4 (descendants) failed: {e}")
         
-        # Method 4: OCR scanning if region provided and no entries found
+        # Method 5: Try window_text() - get all text from grid at once
+        try:
+            grid_text = grid.window_text()
+            if grid_text:
+                print(f"    [*] Grid window_text length: {len(grid_text)}")
+                # Split by lines and parse each
+                lines = grid_text.split('\n')
+                for idx, line in enumerate(lines):
+                    line = line.strip()
+                    if line:
+                        parsed = parse_grid_entry(line)
+                        if parsed:
+                            date_str, time_str, code = parsed
+                            entries.append((date_str, time_str, code, idx))
+                            print(f"        Line {idx}: {line}")
+                
+                if entries:
+                    print(f"    [✓] Found {len(entries)} entries via window_text()")
+                    return entries, None
+        except Exception as e:
+            print(f"    [*] Method 5 (window_text) failed: {e}")
+        
+        # Method 6: Try using texts() - get all text properties
+        try:
+            if hasattr(grid, 'texts'):
+                grid_texts = grid.texts()
+                print(f"    [*] Grid texts() returned {len(grid_texts)} items")
+                
+                for idx, text in enumerate(grid_texts):
+                    if text:
+                        parsed = parse_grid_entry(text)
+                        if parsed:
+                            date_str, time_str, code = parsed
+                            entries.append((date_str, time_str, code, idx))
+                            print(f"        Text {idx}: {text}")
+                
+                if entries:
+                    print(f"    [✓] Found {len(entries)} entries via texts()")
+                    return entries, None
+        except Exception as e:
+            print(f"    [*] Method 6 (texts) failed: {e}")
+        
+        # Method 7: Try using keyboard navigation to read grid rows
+        try:
+            import pyautogui
+            grid.click_input()  # Focus grid
+            wait(0.3)
+            
+            # Move to first row (Home key)
+            pyautogui.press('home')
+            wait(0.2)
+            
+            # Try reading rows using arrow keys and clipboard
+            for row_idx in range(20):  # Try up to 20 rows
+                try:
+                    # Copy current cell/row to clipboard
+                    pyautogui.hotkey('ctrl', 'c')
+                    wait(0.2)
+                    
+                    # Get text from clipboard
+                    import pyperclip
+                    row_text = pyperclip.paste()
+                    
+                    if row_text:
+                        parsed = parse_grid_entry(row_text)
+                        if parsed:
+                            date_str, time_str, code = parsed
+                            # Check if we already have this entry (avoid duplicates)
+                            if not any(e[0] == date_str and e[1] == time_str and e[2] == code for e in entries):
+                                entries.append((date_str, time_str, code, row_idx))
+                                print(f"        Row {row_idx} (keyboard nav): {row_text}")
+                    
+                    # Move to next row
+                    pyautogui.press('down')
+                    wait(0.2)
+                    
+                    # Check if we've reached the end (compare clipboard to detect no change)
+                    new_text = pyperclip.paste()
+                    if new_text == row_text and row_text:  # Same text, might be at end
+                        # Try one more time to confirm
+                        wait(0.2)
+                        pyautogui.press('down')
+                        wait(0.2)
+                        final_text = pyperclip.paste()
+                        if final_text == row_text:
+                            break  # Reached end
+                except Exception as e:
+                    # If error, try to continue with next row
+                    try:
+                        pyautogui.press('down')
+                        wait(0.2)
+                    except:
+                        break
+                    continue
+            
+            if entries:
+                print(f"    [✓] Found {len(entries)} entries via keyboard navigation")
+                return entries, None
+        except Exception as e:
+            print(f"    [*] Method 7 (keyboard navigation) failed: {e}")
+        
+        # Method 8: Try selecting rows and reading selected text via clicking
+        try:
+            import pyautogui
+            grid.click_input()  # Focus grid
+            wait(0.2)
+            
+            # Try selecting rows one by one and reading
+            if row_height == 0:
+                row_height = 25  # Default estimate
+            
+            for row_idx in range(10):  # Try up to 10 rows
+                try:
+                    # Calculate row position
+                    row_y = rect.top + (row_idx * row_height) + (row_height // 2)
+                    row_x = rect.left + (rect.width() // 2)
+                    
+                    # Click row to select it
+                    pyautogui.click(row_x, row_y)
+                    wait(0.2)
+                    
+                    # Try to copy selected text
+                    pyautogui.hotkey('ctrl', 'c')
+                    wait(0.2)
+                    
+                    import pyperclip
+                    selected_text = pyperclip.paste()
+                    if selected_text:
+                        parsed = parse_grid_entry(selected_text)
+                        if parsed:
+                            date_str, time_str, code = parsed
+                            # Check for duplicates
+                            if not any(e[0] == date_str and e[1] == time_str and e[2] == code for e in entries):
+                                entries.append((date_str, time_str, code, row_idx))
+                                print(f"        Selected row {row_idx}: {selected_text}")
+                except Exception:
+                    continue
+            
+            if entries:
+                print(f"    [✓] Found {len(entries)} entries via row selection")
+                return entries, None
+        except Exception as e:
+            print(f"    [*] Method 8 (row selection) failed: {e}")
+        
+        # Method 9: OCR scanning if region provided and no entries found
         if not entries and scan_region:
-            print("    [*] All standard methods failed - trying OCR scan...")
+            print("    [*] All pywinauto methods failed - trying OCR scan...")
             ocr_entries_with_coords = scan_grid_with_ocr(scan_region)
             # Convert OCR entries to format expected by rest of code
             for idx, ocr_entry in enumerate(ocr_entries_with_coords):
@@ -348,11 +545,12 @@ def get_grid_entries(win, scan_region: Optional[Tuple[int, int, int, int]] = Non
                 return entries, ocr_entries_with_coords
         
         # If no entries found, return empty list
-        # The click function will use fallback method (click first/second rows)
-        print("    [!] Could not read grid entries - will use fallback click method")
+        print("    [!] Could not read grid entries using any method")
         
     except Exception as e:
         print(f"    [!] Error reading grid: {e}")
+        import traceback
+        traceback.print_exception(type(e), e, e.__traceback__)
         # Try OCR as last resort if region provided
         if not entries and scan_region:
             print("    [*] Trying OCR scan as last resort...")
