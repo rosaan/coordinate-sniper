@@ -10,7 +10,7 @@ from utils import click, click_and_type, wait, enter_save_file_name, save_file
 from utils.app_manager import connect_or_start, bring_up_window, close_application
 
 # Coordinate definitions for the import mind report flow
-CLIENT_CODE_INPUT = None  # Will use pywinauto to find by control_id
+CLIENT_CODE_INPUT = (222.5, 208.75)  # Client code input field coordinates (same as search_client_input)
 GRID_CONTROL = None  # Will use pywinauto to find by control_id
 PRINT_BUTTON_1 = (1242.5, 227.5)
 PRINT_BUTTON_2 = (1527.5, 150)
@@ -430,7 +430,7 @@ def import_mind_report(client_code: str,
     7. Click button at (1527.5, 150)
     8. Wait for "Print Preview" window (slow, wait for maximize)
     9. Click save button at (601.25, 45)
-    10. Save file to %USERPROFILE%\scripts\coordinate-sniper\files\{client_code}_{date}_{time}.pdf
+    10. Save file to %USERPROFILE%\\scripts\\coordinate-sniper\\files\\{client_code}_{date}_{time}.pdf
     11. Verify file exists
     12. Close VAEEG
     
@@ -474,21 +474,16 @@ def import_mind_report(client_code: str,
         except Exception as e:
             print(f"    [!] Warning: Could not focus window: {e}")
         
-        # Step 1: Click client code input field
+        # Step 1: Click client code input field (using coordinates)
         error_step = "client_code_input_click"
         error_context["step"] = "Clicking client code input field"
         print("    [*] Clicking client code input field...")
         try:
-            client_input = win.child_window(control_id=3015944, class_name="TRzEdit")
-            if client_input.exists():
-                client_input.click_input()
-                wait(0.5)
-                print("    [✓] Client code input field clicked")
-            else:
-                raise Exception("Client code input field not found (control_id=3015944, class_name='TRzEdit')")
+            click(CLIENT_CODE_INPUT, delay=0.5)
+            print("    [✓] Client code input field clicked")
         except Exception as e:
             raise RuntimeError(
-                f"MIND_REPORT_ERROR_INPUT_CLICK: Failed to click client code input field: {str(e)}. "
+                f"MIND_REPORT_ERROR_INPUT_CLICK: Failed to click client code input field at {CLIENT_CODE_INPUT}: {str(e)}. "
                 f"Client code: {client_code}"
             )
         
@@ -497,8 +492,7 @@ def import_mind_report(client_code: str,
         error_context["step"] = f"Typing client code: {client_code}"
         print(f"    [*] Typing client code: {client_code}...")
         try:
-            client_input = win.child_window(control_id=3015944, class_name="TRzEdit")
-            client_input.type_keys(client_code, with_spaces=False, with_tabs=False, with_newlines=False)
+            click_and_type(CLIENT_CODE_INPUT, client_code, clear_first=True, type_interval=0.02, delay=1.0)
             wait(1.0)  # Wait for grid to update
             print("    [✓] Client code entered")
         except Exception as e:
