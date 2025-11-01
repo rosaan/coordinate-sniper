@@ -5,6 +5,7 @@ Exports PDF and uploads to server.
 import os
 import re
 import datetime
+import pyautogui
 from typing import Optional, Tuple, List
 from utils import click, click_and_type, wait, enter_save_file_name, save_file
 from utils.app_manager import connect_or_start, bring_up_window, close_application
@@ -12,6 +13,16 @@ from utils.app_manager import connect_or_start, bring_up_window, close_applicati
 # Coordinate definitions for the import mind report flow
 CLIENT_CODE_INPUT = (222.5, 208.75)  # Client code input field coordinates (same as search_client_input)
 GRID_CONTROL = None  # Will use pywinauto to find by control_id
+# Grid region: center at (917.5, 655), width ~500, height ~900
+GRID_CENTER = (917.5, 655)
+GRID_WIDTH = 500
+GRID_HEIGHT = 900
+GRID_SCAN_REGION = (
+    int(GRID_CENTER[0] - GRID_WIDTH / 2),  # x: center_x - width/2
+    int(GRID_CENTER[1] - GRID_HEIGHT / 2),  # y: center_y - height/2
+    GRID_WIDTH,  # width
+    GRID_HEIGHT  # height
+)  # (x, y, width, height) - region to scan for grid entries using OCR
 PRINT_BUTTON_1 = (1242.5, 227.5)
 PRINT_BUTTON_2 = (1527.5, 150)
 PRINT_PREVIEW_SAVE = (601.25, 45)
@@ -25,41 +36,232 @@ def parse_grid_entry(text: str) -> Optional[Tuple[str, str, int]]:
     """
     Parse a grid entry in format: YYYY-MM-DD HH:MM 480/1440/1441
     
+    Tries multiple patterns to handle various formats and OCR variations:
+    - "2024-01-15 14:30 480"
+    - "2024-01-15 14:30 480 " (with trailing space)
+    - "2024-01-15  14:30  480" (multiple spaces)
+    - Dates with slashes or dots (normalized to dashes)
+    - Times with or without seconds
+    
     Args:
         text: Grid entry text
         
     Returns:
-        Tuple of (date_str, time_str, code) or None if invalid
+        Tuple of (date_str, time_str, code) or None if not matched
     """
-    # Pattern: YYYY-MM-DD HH:MM 480/1440/1441
-    pattern = r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+(480|1440|1441)"
-    match = re.match(pattern, text.strip())
+    # Clean the text first
+    text = text.strip()
+    
+    # Pattern 1: Standard format YYYY-MM-DD HH:MM 480/1440/1441
+    pattern1 = r'(\d{4}[-/]\d{2}[-/]\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)\s+(480|1440|1441)'
+    match = re.search(pattern1, text)
     if match:
-        date_str = match.group(1)
+        date_str = match.group(1).replace('/', '-')  # Normalize to dashes
         time_str = match.group(2)
+        if ':' in time_str and time_str.count(':') == 1:
+            time_str = time_str.zfill(5)  # Ensure HH:MM format (e.g., "9:30" -> "09:30")
         code = int(match.group(3))
         return (date_str, time_str, code)
+    
+    # Pattern 2: More flexible spacing (allows multiple spaces)
+    pattern2 = r'(\d{4}[-/.]\d{2}[-/.]\d{2})\s*(\d{1,2}:\d{2})\s*(480|1440|1441)'
+    match = re.search(pattern2, text)
+    if match:
+        date_str = match.group(1).replace('/', '-').replace('.', '-')
+        time_str = match.group(2).zfill(5) if ':' in match.group(2) and len(match.group(2)) < 5 else match.group(2)
+        code = int(match.group(3))
+        return (date_str, time_str, code)
+    
+    # Pattern 3: Look for date, time, and code separately (more lenient for OCR errors)
+    # Extract date (YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD)
+    date_match = re.search(r'(\d{4}[-/.]\d{2}[-/.]\d{2})', text)
+    # Extract time (HH:MM or H:MM)
+    time_match = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)', text)
+    # Extract code (must be standalone 480, 1440, or 1441)
+    code_match = re.search(r'\b(480|1440|1441)\b', text)
+    
+    if date_match and time_match and code_match:
+        date_str = date_match.group(1).replace('/', '-').replace('.', '-')
+        time_str = time_match.group(1)
+        if ':' in time_str and time_str.count(':') == 1:
+            # Ensure two-digit hour
+            parts = time_str.split(':')
+            if len(parts) == 2:
+                hour = parts[0].zfill(2)
+                minute = parts[1].zfill(2)
+                time_str = f"{hour}:{minute}"
+        code = int(code_match.group(1))
+        return (date_str, time_str, code)
+    
     return None
 
 
-def get_grid_entries(win) -> List[Tuple[str, str, int, int]]:
+def scan_grid_with_ocr(region: Tuple[int, int, int, int]) -> List[Tuple[str, str, int, Tuple[int, int]]]:
+    """
+    Scan a region using OCR to find grid entries.
+    OCR is enabled for this function even if globally disabled.
+    
+    Args:
+        region: Tuple of (x, y, width, height) - region to scan
+        
+    Returns:
+        List of tuples: (date_str, time_str, code, (x, y)) where (x, y) is approximate center of entry
+    """
+    entries = []
+    
+    try:
+        import pytesseract
+        from PIL import Image
+        
+        x, y, width, height = region
+        print(f"    [*] Scanning region with OCR: x={x}, y={y}, width={width}, height={height}")
+        
+        # Capture screenshot of the region
+        screenshot = pyautogui.screenshot(region=(int(x), int(y), int(width), int(height)))
+        
+        # Optionally save screenshot for debugging
+        # screenshot.save("grid_debug.png")
+        
+        # Use OCR to extract text with bounding boxes
+        try:
+            # Use better OCR config for better accuracy
+            custom_config = r'--oem 3 --psm 6'  # Assume uniform block of text
+            data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT, config=custom_config)
+        except Exception as ocr_error:
+            print(f"    [!] OCR error: {ocr_error}")
+            # Try without custom config
+            try:
+                data = pytesseract.image_to_data(screenshot, output_type=pytesseract.Output.DICT)
+            except Exception:
+                return entries
+        
+        # Extract text and find grid entries
+        # Group text by lines for better parsing
+        lines_dict = {}  # key: y_position (normalized), value: list of (text, x, width, y)
+        
+        n_boxes = len(data['text'])
+        for i in range(n_boxes):
+            text = data['text'][i].strip()
+            conf = data['conf'][i]
+            
+            # Skip empty text or very low confidence
+            if not text or conf < 20:
+                continue
+            
+            # Get bounding box coordinates (convert to screen coordinates)
+            box_x = data['left'][i] + x
+            box_y = data['top'][i] + y
+            box_w = data['width'][i]
+            box_h = data['height'][i]
+            
+            # Group by line (y position with tolerance - lines are similar y values)
+            line_y = None
+            for existing_y in lines_dict.keys():
+                # Consider same line if within 80% of box height
+                if abs(box_y - existing_y) < max(box_h * 0.8, 15):  # At least 15px tolerance
+                    line_y = existing_y
+                    break
+            
+            if line_y is None:
+                line_y = box_y
+                lines_dict[line_y] = []
+            
+            lines_dict[line_y].append((text, box_x, box_w, box_y, box_h))
+        
+        # Process each line - try to find grid entry pattern
+        for line_y in sorted(lines_dict.keys()):
+            # Sort text boxes by x position (left to right)
+            line_boxes = sorted(lines_dict[line_y], key=lambda b: b[1])
+            
+            # Try multiple ways to combine the text
+            # Method 1: Combine all text with spaces
+            line_text = " ".join([box[0] for box in line_boxes])
+            
+            # Try to parse as grid entry
+            parsed = parse_grid_entry(line_text)
+            if parsed:
+                date_str, time_str, code = parsed
+                # Calculate center position of the entire line
+                if line_boxes:
+                    first_x = line_boxes[0][1]
+                    last_x = line_boxes[-1][1] + line_boxes[-1][2]
+                    center_x = (first_x + last_x) // 2
+                    # Use the actual y position of the line
+                    center_y = line_y + (line_boxes[0][4] // 2)  # Use height from first box
+                    entries.append((date_str, time_str, code, (center_x, center_y)))
+                    continue
+            
+            # Method 2: Try without spaces (OCR might split incorrectly)
+            line_text_no_spaces = "".join([box[0] for box in line_boxes])
+            parsed = parse_grid_entry(line_text_no_spaces)
+            if parsed:
+                date_str, time_str, code = parsed
+                if line_boxes:
+                    first_x = line_boxes[0][1]
+                    last_x = line_boxes[-1][1] + line_boxes[-1][2]
+                    center_x = (first_x + last_x) // 2
+                    center_y = line_y + (line_boxes[0][4] // 2)
+                    entries.append((date_str, time_str, code, (center_x, center_y)))
+                    continue
+            
+            # Method 3: Try each text box individually (in case OCR grouped incorrectly)
+            for box in line_boxes:
+                parsed = parse_grid_entry(box[0])
+                if parsed:
+                    date_str, time_str, code = parsed
+                    center_x = box[1] + (box[2] // 2)
+                    center_y = box[3] + (box[4] // 2)
+                    entries.append((date_str, time_str, code, (center_x, center_y)))
+                    break  # Found one, move to next line
+        
+        if entries:
+            print(f"    [✓] Found {len(entries)} entries via OCR scanning")
+            for entry in entries:
+                print(f"        - {entry[0]} {entry[1]} {entry[2]} at ({entry[3][0]}, {entry[3][1]})")
+        
+    except ImportError:
+        print("    [!] OCR not available - install pytesseract and Pillow")
+    except Exception as e:
+        print(f"    [!] Error scanning with OCR: {e}")
+        import traceback
+        traceback.print_exception(type(e), e, e.__traceback__)
+    
+    return entries
+
+
+def get_grid_entries(win, scan_region: Optional[Tuple[int, int, int, int]] = None) -> Tuple[List[Tuple[str, str, int, int]], Optional[List[Tuple[str, str, int, Tuple[int, int]]]]]:
     """
     Get all entries from the grid control.
+    Falls back to OCR scanning if scan_region is provided and standard methods fail.
     
     Args:
         win: WindowSpecification object containing the grid
+        scan_region: Optional tuple of (x, y, width, height) - region to scan with OCR
         
     Returns:
-        List of tuples: (date_str, time_str, code, row_index)
+        Tuple of:
+        - List of tuples: (date_str, time_str, code, row_index) - standard format
+        - Optional list of OCR entries: (date_str, time_str, code, (x, y)) - with coordinates
     """
     entries = []
+    ocr_entries_with_coords = None
+    
     try:
         # Find the grid control
         grid = win.child_window(control_id=2163448, class_name="TDBGrid")
         
         if not grid.exists():
             print("    [!] Grid control not found")
-            return entries
+            # Try OCR scanning if region provided
+            if scan_region:
+                print("    [*] Trying OCR scan as fallback...")
+                ocr_entries_with_coords = scan_grid_with_ocr(scan_region)
+                # Convert OCR entries to format expected by rest of code
+                for idx, ocr_entry in enumerate(ocr_entries_with_coords):
+                    date_str, time_str, code, _ = ocr_entry
+                    entries.append((date_str, time_str, code, idx))
+                return entries, ocr_entries_with_coords
+            return entries, None
         
         # Method 1: Try to get all row text from grid
         try:
@@ -74,7 +276,7 @@ def get_grid_entries(win) -> List[Tuple[str, str, int, int]]:
                         entries.append((date_str, time_str, code, idx))
                 if entries:
                     print(f"    [✓] Found {len(entries)} entries via window_text()")
-                    return entries
+                    return entries, None
         except Exception as e:
             print(f"    [*] Method 1 failed: {e}")
         
@@ -110,7 +312,7 @@ def get_grid_entries(win) -> List[Tuple[str, str, int, int]]:
             
             if entries:
                 print(f"    [✓] Found {len(entries)} entries via cell access")
-                return entries
+                return entries, None
         except Exception as e:
             print(f"    [*] Method 2 failed: {e}")
         
@@ -130,9 +332,20 @@ def get_grid_entries(win) -> List[Tuple[str, str, int, int]]:
             
             if entries:
                 print(f"    [✓] Found {len(entries)} entries via descendants")
-                return entries
+                return entries, None
         except Exception as e:
             print(f"    [*] Method 3 failed: {e}")
+        
+        # Method 4: OCR scanning if region provided and no entries found
+        if not entries and scan_region:
+            print("    [*] All standard methods failed - trying OCR scan...")
+            ocr_entries_with_coords = scan_grid_with_ocr(scan_region)
+            # Convert OCR entries to format expected by rest of code
+            for idx, ocr_entry in enumerate(ocr_entries_with_coords):
+                date_str, time_str, code, _ = ocr_entry
+                entries.append((date_str, time_str, code, idx))
+            if entries:
+                return entries, ocr_entries_with_coords
         
         # If no entries found, return empty list
         # The click function will use fallback method (click first/second rows)
@@ -140,23 +353,76 @@ def get_grid_entries(win) -> List[Tuple[str, str, int, int]]:
         
     except Exception as e:
         print(f"    [!] Error reading grid: {e}")
+        # Try OCR as last resort if region provided
+        if not entries and scan_region:
+            print("    [*] Trying OCR scan as last resort...")
+            ocr_entries_with_coords = scan_grid_with_ocr(scan_region)
+            for idx, ocr_entry in enumerate(ocr_entries_with_coords):
+                date_str, time_str, code, _ = ocr_entry
+                entries.append((date_str, time_str, code, idx))
+            if entries:
+                return entries, ocr_entries_with_coords
     
-    return entries
+    return entries, None
 
 
-def find_and_click_grid_entries(win, entries: List[Tuple[str, str, int, int]]) -> bool:
+def find_and_click_grid_entries(win, entries: List[Tuple[str, str, int, int]], ocr_entries_with_coords: Optional[List[Tuple[str, str, int, Tuple[int, int]]]] = None) -> bool:
     """
     Find and click the latest entry and the 480 version entry in the grid.
     Usually the first or second row contains the entries we need.
+    If OCR entries with coordinates are provided, uses those coordinates directly.
     
     Args:
         win: WindowSpecification object
         entries: List of parsed grid entries (may be empty if reading failed)
+        ocr_entries_with_coords: Optional list of OCR entries with screen coordinates
         
     Returns:
         True if entries were clicked, False otherwise
     """
     try:
+        import pyautogui
+        
+        # If we have OCR entries with coordinates, use them directly
+        if ocr_entries_with_coords and len(ocr_entries_with_coords) > 0:
+            print("    [*] Using OCR-detected coordinates for clicking...")
+            # Sort entries by date and time (latest first)
+            sorted_ocr = sorted(ocr_entries_with_coords, key=lambda x: (x[0], x[1]), reverse=True)
+            
+            # Find latest entry
+            latest_entry = sorted_ocr[0]
+            latest_coords = latest_entry[3]  # (x, y)
+            
+            # Find 480 version entry
+            code_480_entry = None
+            for entry in sorted_ocr:
+                if entry[2] == 480:
+                    code_480_entry = entry
+                    break
+            
+            # Click latest entry
+            print(f"    [*] Clicking latest entry at coordinates: {latest_coords}")
+            pyautogui.click(latest_coords[0], latest_coords[1])
+            wait(0.5)
+            
+            # If latest is already 480, we're done
+            if latest_entry[2] == 480:
+                print("    [✓] Latest entry is 480 version - clicked")
+                return True
+            
+            # If we need to click 480 separately and it's different from latest
+            if code_480_entry and code_480_entry != latest_entry:
+                code_480_coords = code_480_entry[3]
+                print(f"    [*] Clicking 480 version entry at coordinates: {code_480_coords}")
+                pyautogui.click(code_480_coords[0], code_480_coords[1])
+                wait(0.5)
+                print("    [✓] Both entries clicked using OCR coordinates")
+            else:
+                print("    [✓] Latest entry clicked (480 version not found separately)")
+            
+            return True
+        
+        # Fallback to standard method
         grid = win.child_window(control_id=2163448, class_name="TDBGrid")
         
         if not grid.exists():
@@ -164,7 +430,6 @@ def find_and_click_grid_entries(win, entries: List[Tuple[str, str, int, int]]) -
             return False
         
         rect = grid.rectangle()
-        import pyautogui
         
         if entries:
             # We have parsed entries - click based on data
@@ -505,12 +770,26 @@ def import_mind_report(client_code: str,
         error_context["step"] = "Reading grid entries"
         print("    [*] Reading grid entries...")
         try:
-            entries = get_grid_entries(win)
+            # Try to get grid rectangle for OCR scanning if needed
+            scan_region = None
+            try:
+                grid = win.child_window(control_id=2163448, class_name="TDBGrid")
+                if grid.exists():
+                    rect = grid.rectangle()
+                    scan_region = (rect.left, rect.top, rect.width(), rect.height())
+                    print(f"    [*] Grid region detected: x={rect.left}, y={rect.top}, width={rect.width()}, height={rect.height()}")
+            except Exception:
+                # If GRID_SCAN_REGION is set, use it
+                if GRID_SCAN_REGION:
+                    scan_region = GRID_SCAN_REGION
+                    print(f"    [*] Using predefined scan region: {scan_region}")
+            
+            entries, ocr_entries_with_coords = get_grid_entries(win, scan_region=scan_region)
             
             if not entries:
                 raise RuntimeError(
                     f"MIND_REPORT_ERROR_GRID_EMPTY: No entries found in grid after entering client code '{client_code}'. "
-                    f"Grid may be empty or grid reading failed."
+                    f"Grid may be empty or grid reading failed. If you know the grid position, set GRID_SCAN_REGION = (x, y, width, height) for OCR scanning."
                 )
             
             print(f"    [*] Found {len(entries)} entries in grid")
@@ -529,7 +808,7 @@ def import_mind_report(client_code: str,
         error_context["step"] = "Clicking grid entries"
         print("    [*] Clicking grid entries...")
         try:
-            if not find_and_click_grid_entries(win, entries):
+            if not find_and_click_grid_entries(win, entries, ocr_entries_with_coords=ocr_entries_with_coords):
                 raise RuntimeError(
                     f"MIND_REPORT_ERROR_GRID_CLICK: Failed to click grid entries. "
                     f"Client code: {client_code}, Found {len(entries)} entries"
