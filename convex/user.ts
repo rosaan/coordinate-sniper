@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
+import { internal } from "./_generated/api";
 
 /**
  * Generate a random 5-character alphanumeric code.
@@ -15,6 +16,7 @@ function generateRandomCode(): string {
 
 /**
  * Create a new user. Only firstName is required. clientCode is auto-generated as unique 5-character code.
+ * Automatically queues a create_user operation for processing by the sync engine.
  */
 export const createUser = mutation({
   args: {
@@ -24,7 +26,11 @@ export const createUser = mutation({
     email: v.optional(v.string()),
     recordingInstruction: v.optional(v.array(v.string())),
   },
-  returns: v.id("users"),
+  returns: v.object({
+    userId: v.id("users"),
+    operationId: v.id("operations"),
+    message: v.string(),
+  }),
   handler: async (ctx, args) => {
     // Generate unique 5-character clientCode
     let clientCode: string;
@@ -54,7 +60,8 @@ export const createUser = mutation({
       );
     }
 
-    return await ctx.db.insert("users", {
+    // Create user
+    const userId = await ctx.db.insert("users", {
       firstName: args.firstName,
       clientCode: clientCode!,
       lastName: args.lastName,
@@ -62,6 +69,22 @@ export const createUser = mutation({
       email: args.email,
       recordingInstruction: args.recordingInstruction,
     });
+
+    // Queue create_user operation using internal mutation
+    const operationId = await ctx.runMutation(
+      internal.operations.queueOperation,
+      {
+        operationType: "create_user",
+        userId: userId,
+        priority: 0, // Normal priority
+      }
+    );
+
+    return {
+      userId: userId,
+      operationId: operationId,
+      message: `User created and queued for processing: ${args.firstName} (${clientCode!})`,
+    };
   },
 });
 
@@ -228,5 +251,153 @@ export const retryUser = mutation({
       isCreatedLocally: false,
     });
     return null;
+  },
+});
+
+/**
+ * List users that need mind report import.
+ * Returns users that have mindReportStatus as "pending" or null.
+ */
+export const listPendingMindReports = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      _id: v.id("users"),
+      _creationTime: v.number(),
+      clientCode: v.string(),
+      firstName: v.string(),
+      lastName: v.optional(v.string()),
+      mindReportStatus: v.optional(v.string()),
+      mindReportFileLink: v.optional(v.string()),
+    })
+  ),
+  handler: async (ctx) => {
+    const allUsers = await ctx.db.query("users").collect();
+    return allUsers.filter(
+      (user) => !user.mindReportStatus || user.mindReportStatus === "pending"
+    );
+  },
+});
+
+/**
+ * Update mind report file link for a user.
+ */
+export const updateMindReportLink = mutation({
+  args: {
+    userId: v.id("users"),
+    fileLink: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    await ctx.db.patch(args.userId, {
+      mindReportFileLink: args.fileLink,
+      mindReportStatus: "completed",
+    });
+    return null;
+  },
+});
+
+/**
+ * Update mind report status for a user.
+ */
+export const updateMindReportStatus = mutation({
+  args: {
+    userId: v.id("users"),
+    status: v.string(), // "pending", "processing", "completed", "failed"
+    errorReason: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    await ctx.db.patch(args.userId, {
+      mindReportStatus: args.status,
+      // Append error reason to existing errorReason array if provided
+      errorReason: args.errorReason
+        ? [
+            ...(Array.isArray(user.errorReason)
+              ? user.errorReason
+              : user.errorReason
+                ? [user.errorReason]
+                : []),
+            args.errorReason,
+          ]
+        : user.errorReason,
+    });
+    return null;
+  },
+});
+
+/**
+ * Trigger mind report import for a specific user.
+ * Queues the operation for processing by the local Python sync engine.
+ */
+export const getMindReport = mutation({
+  args: {
+    userId: v.id("users"),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    message: v.string(),
+    operationId: v.optional(v.id("operations")),
+  }),
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.userId);
+    if (!user) {
+      throw new ConvexError("User not found");
+    }
+
+    // Check if already processing or completed
+    const currentStatus = user.mindReportStatus;
+    if (currentStatus === "processing") {
+      return {
+        success: false,
+        message: "Mind report import is already in progress for this user",
+        operationId: undefined,
+      };
+    }
+
+    if (currentStatus === "completed" && user.mindReportFileLink) {
+      return {
+        success: false,
+        message: "Mind report already exists for this user",
+        operationId: undefined,
+      };
+    }
+
+    // Queue the operation using internal mutation
+    try {
+      const operationId = await ctx.runMutation(
+        internal.operations.queueOperation,
+        {
+          operationType: "get_mind_report",
+          userId: args.userId,
+          priority: 0, // Normal priority
+        }
+      );
+
+      return {
+        success: true,
+        message: `Mind report import queued for user ${user.firstName} (${user.clientCode})`,
+        operationId: operationId,
+      };
+    } catch (error: any) {
+      if (error.message?.includes("already queued")) {
+        return {
+          success: false,
+          message: error.message,
+          operationId: undefined,
+        };
+      }
+      throw error;
+    }
   },
 });
