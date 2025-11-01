@@ -26,36 +26,80 @@ if not CONVEX_URL:
     sys.exit(1)
 
 
-def report_error_to_server(client: ConvexClient, operation_id: str, error_msg: str, max_retries: int = 3) -> bool:
+def report_error_to_server(client: ConvexClient, operation_id: str, error_msg: str, user_id: Optional[str] = None, operation_type: Optional[str] = None, max_retries: int = 3) -> bool:
     """
     Report error to server with retry logic.
+    Also updates user-specific status if operation_type is provided.
     
     Args:
         client: Convex client instance
         operation_id: Operation ID
         error_msg: Error message to report
+        user_id: Optional user ID (for updating user-specific status)
+        operation_type: Optional operation type (e.g., "get_mind_report" to update mindReportStatus)
         max_retries: Maximum number of retry attempts
         
     Returns:
         True if error was reported successfully, False otherwise
     """
+    operation_updated = False
+    user_status_updated = False
+    
     for attempt in range(max_retries):
-        try:
-            client.mutation("operations:updateOperationStatus", {
-                "operationId": operation_id,
-                "status": "failed",
-                "errorReason": error_msg
-            })
-            print(f"    [✓] Error reported to server (attempt {attempt + 1})")
+        # Update operation status
+        if not operation_updated:
+            try:
+                client.mutation("operations:updateOperationStatus", {
+                    "operationId": operation_id,
+                    "status": "failed",
+                    "errorReason": error_msg
+                })
+                operation_updated = True
+                print(f"    [✓] Operation status updated to 'failed' (attempt {attempt + 1})")
+            except Exception as op_error:
+                print(f"    [!] Failed to update operation status (attempt {attempt + 1}/{max_retries}): {op_error}")
+                if attempt < max_retries - 1:
+                    wait(1.0)
+                    continue
+                else:
+                    print(f"    [✗] CRITICAL: Failed to update operation status after {max_retries} attempts")
+        
+        # Update user-specific status if needed
+        if user_id and operation_type == "get_mind_report" and not user_status_updated:
+            try:
+                client.mutation("user:updateMindReportStatus", {
+                    "userId": user_id,
+                    "status": "failed",
+                    "errorReason": error_msg
+                })
+                user_status_updated = True
+                print(f"    [✓] User mindReportStatus updated to 'failed' (attempt {attempt + 1})")
+            except Exception as user_error:
+                print(f"    [!] Failed to update user mindReportStatus (attempt {attempt + 1}/{max_retries}): {user_error}")
+                if attempt < max_retries - 1:
+                    wait(1.0)
+                    continue  # Retry user status update
+                else:
+                    print(f"    [✗] CRITICAL: Failed to update user mindReportStatus after {max_retries} attempts")
+        
+        # Check if both updates succeeded (or user update not needed)
+        needs_user_update = user_id and operation_type == "get_mind_report"
+        if operation_updated and (not needs_user_update or user_status_updated):
+            print(f"    [✓] All error statuses reported to server (attempt {attempt + 1})")
             return True
-        except Exception as report_error:
+        
+        # If we need user update but didn't get it, retry
+        if operation_updated and needs_user_update and not user_status_updated:
             if attempt < max_retries - 1:
-                print(f"    [!] Failed to report error to server (attempt {attempt + 1}/{max_retries}): {report_error}")
                 wait(1.0)
-            else:
-                print(f"    [✗] CRITICAL: Failed to report error to server after {max_retries} attempts: {report_error}")
-                print(f"    [✗] Original error was: {error_msg}")
-                return False
+                continue
+    
+    # Return True if at least operation was updated (even if user update failed)
+    if operation_updated:
+        if needs_user_update and not user_status_updated:
+            print(f"    [✗] WARNING: Operation status updated but user mindReportStatus update failed")
+        return True
+    
     return False
 
 
@@ -221,7 +265,7 @@ def process_get_mind_report_operation(operation: Dict[str, Any], user: Dict[str,
         except RuntimeError as e:
             error_msg = f"MIND_REPORT_IMPORT_FAILED: {str(e)}"
             print(f"    [✗] {error_msg}")
-            report_error_to_server(client, operation_id, error_msg)
+            report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
             return
         except Exception as e:
             import traceback
@@ -231,7 +275,7 @@ def process_get_mind_report_operation(operation: Dict[str, Any], user: Dict[str,
                 f"Client code: {client_code}, User ID: {user_id}\nTraceback:\n{tb_str}"
             )
             print(f"    [✗] {error_msg}")
-            report_error_to_server(client, operation_id, error_msg)
+            report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
             return
         
         # Verify file was created
@@ -241,7 +285,7 @@ def process_get_mind_report_operation(operation: Dict[str, Any], user: Dict[str,
                 f"Client code: {client_code}, File path: {file_path if file_path else 'None'}"
             )
             print(f"    [✗] {error_msg}")
-            report_error_to_server(client, operation_id, error_msg)
+            report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
             return
         
         # Verify file is not empty
@@ -250,12 +294,12 @@ def process_get_mind_report_operation(operation: Dict[str, Any], user: Dict[str,
             if file_size == 0:
                 error_msg = f"MIND_REPORT_FILE_EMPTY: Exported file is empty (0 bytes): {file_path}"
                 print(f"    [✗] {error_msg}")
-                report_error_to_server(client, operation_id, error_msg)
+                report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
                 return
         except Exception as e:
             error_msg = f"MIND_REPORT_FILE_CHECK_ERROR: Error checking file size: {str(e)}. File path: {file_path}"
             print(f"    [✗] {error_msg}")
-            report_error_to_server(client, operation_id, error_msg)
+            report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
             return
         
         print(f"    [✓] Mind report PDF exported: {file_path} ({os.path.getsize(file_path)} bytes)")
@@ -272,13 +316,13 @@ def process_get_mind_report_operation(operation: Dict[str, Any], user: Dict[str,
                 f"File path: {file_path}, Client code: {client_code}\nTraceback:\n{tb_str}"
             )
             print(f"    [✗] {error_msg}")
-            report_error_to_server(client, operation_id, error_msg)
+            report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
             return
         
         if not file_link:
             error_msg = f"MIND_REPORT_UPLOAD_FAILED: File upload returned None or empty. File path: {file_path}"
             print(f"    [✗] {error_msg}")
-            report_error_to_server(client, operation_id, error_msg)
+            report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
             return
         
         print(f"    [✓] File uploaded: {file_link}")
@@ -286,12 +330,15 @@ def process_get_mind_report_operation(operation: Dict[str, Any], user: Dict[str,
         # Save link in database
         print("    [*] Saving file link to database...")
         try:
+            # updateMindReportLink already sets mindReportStatus to "completed"
             client.mutation("user:updateMindReportLink", {
                 "userId": user_id,
                 "fileLink": file_link
             })
+            # Mark operation as completed
             client.mutation("operations:completeOperation", {"operationId": operation_id})
             print(f"    [✓] File link saved to database")
+            print(f"    [✓] Mind report status updated to 'completed'")
         except Exception as update_error:
             import traceback
             tb_str = ''.join(traceback.format_exception(type(update_error), update_error, update_error.__traceback__))
@@ -300,7 +347,7 @@ def process_get_mind_report_operation(operation: Dict[str, Any], user: Dict[str,
                 f"File link: {file_link}, File path: {file_path}\nTraceback:\n{tb_str}"
             )
             print(f"    [✗] {error_msg}")
-            report_error_to_server(client, operation_id, error_msg)
+            report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
             return
         
         print(f"    [✓] GET_MIND_REPORT operation completed successfully")
@@ -332,7 +379,7 @@ def process_get_mind_report_operation(operation: Dict[str, Any], user: Dict[str,
             f"File link: {file_link if file_link else 'not uploaded'}\nTraceback:\n{tb_str}"
         )
         print(f"    [✗] {error_msg}")
-        report_error_to_server(client, operation_id, error_msg)
+        report_error_to_server(client, operation_id, error_msg, user_id=user_id, operation_type="get_mind_report")
         traceback.print_exception(type(e), e, e.__traceback__)
 
 
